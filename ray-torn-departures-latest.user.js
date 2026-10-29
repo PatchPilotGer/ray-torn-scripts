@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.8.5
+// @version      0.8.6
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -42,20 +42,6 @@
         chi: { name: "China", flag: "🇨🇳", mins: [229, 160, 114, 69] },
         uae: { name: "UAE", flag: "🇦🇪", mins: [257, 180, 128, 77] },
         sou: { name: "South Africa", flag: "🇿🇦", mins: [282, 197, 141, 85] }
-    };
-
-    const AIRLINE = {
-        mex: "AM",
-        cay: "KX",
-        can: "AC",
-        haw: "HA",
-        uni: "BA",
-        arg: "AR",
-        swi: "LX",
-        jap: "JL",
-        chi: "CA",
-        uae: "EK",
-        sou: "SA"
     };
 
     const TRAVEL_INDEX = {
@@ -669,18 +655,6 @@
 }
 
 .rtd08-flag{font-size:16px;line-height:1}
-.rtd08-air{
-    flex:0 0 auto;
-    min-width:24px;
-    padding:2px 4px;
-    text-align:center;
-    font-size:8px;
-    font-weight:800;
-    color:#111;
-    background:#f2f2f2;
-    border-radius:2px
-}
-
 .rtd08-country{
     min-width:0;
     color:#f0d467;
@@ -703,18 +677,25 @@
     color:#111;
     border-radius:3px;
     padding:4px 2px;
-    animation:rtd08-blink 1s steps(2,start) infinite
+    animation:rtd08-blink-soon 1s steps(2,start) infinite
 }
 
 .rtd08-time.boarding-late{
     background:#b72222;
     color:#fff;
     border-radius:3px;
-    padding:4px 2px
+    padding:4px 2px;
+    animation:rtd08-blink-late 1s steps(2,start) infinite
 }
 
-@keyframes rtd08-blink{
-    50%{opacity:.35}
+@keyframes rtd08-blink-soon{
+    0%,49%{opacity:1}
+    50%,100%{opacity:.32}
+}
+
+@keyframes rtd08-blink-late{
+    0%,49%{opacity:.32}
+    50%,100%{opacity:1}
 }
 
 .rtd08-restock{color:#f0d467}
@@ -1216,7 +1197,6 @@
 
         <div class="rtd08-dest">
             <span class="rtd08-flag">${r.flag}</span>
-            <span class="rtd08-air">${esc(AIRLINE[r.code] || "")}</span>
             <span class="rtd08-country">${esc(r.country)}</span>
         </div>
 
