@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.8.6
+// @version      0.9.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -25,6 +25,7 @@
     const DEFAULTS = {
         token: "",
         item: "Xanax",
+        watches: null,
         travel: "standard",
         buffer: 5,
         rows: 5
@@ -280,6 +281,70 @@
         return out;
     }
 
+    function itemsForCountry(code) {
+        return (shops?.[code]?.items || [])
+            .filter(item => item?.name)
+            .slice()
+            .sort((a, b) =>
+                String(a.name).localeCompare(String(b.name))
+            );
+    }
+
+    function ensureWatchlist() {
+        if (Array.isArray(settings.watches)) {
+            return;
+        }
+
+        settings.watches = itemCountries(settings.item)
+            .map(entry => ({
+                code: entry.code,
+                item: entry.item.name
+            }));
+
+        saveSettings();
+    }
+
+    function watchEntries() {
+        const result = [];
+        const seen = new Set();
+
+        for (const watch of settings.watches || []) {
+            const code = watch?.code;
+            const itemName = watch?.item;
+
+            if (!COUNTRY[code] || !itemName) {
+                continue;
+            }
+
+            const shop = shops?.[code];
+            const item = (shop?.items || []).find(
+                x =>
+                    String(x.name).toLowerCase() ===
+                    String(itemName).toLowerCase()
+            );
+
+            if (!item) {
+                continue;
+            }
+
+            const key = code + "::" + String(item.name).toLowerCase();
+
+            if (seen.has(key)) {
+                continue;
+            }
+
+            seen.add(key);
+
+            result.push({
+                code,
+                item,
+                shop
+            });
+        }
+
+        return result;
+    }
+
     function flightMinutes(code) {
         const c = COUNTRY[code];
         if (!c) return null;
@@ -425,7 +490,7 @@
     }
 
     async function buildBoard() {
-        const entries = itemCountries(settings.item);
+        const entries = watchEntries();
         const results = [];
 
         for (let i = 0; i < entries.length; i += 2) {
@@ -602,6 +667,57 @@
     color:#edf1f2;
     padding:8px 10px;
     font-size:14px
+}
+
+.rtd09-watchlist{
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+    margin-bottom:10px
+}
+
+.rtd09-watch-row{
+    display:grid;
+    grid-template-columns:.9fr 1.35fr 36px;
+    gap:6px;
+    align-items:center
+}
+
+.rtd09-watch-row select{
+    min-width:0;
+    width:100%;
+    min-height:40px;
+    border:1px solid #45545d;
+    border-radius:4px;
+    background:#0a0f12;
+    color:#edf1f2;
+    padding:7px 8px;
+    font-size:12px
+}
+
+.rtd09-remove,
+.rtd09-add{
+    border-radius:4px;
+    font-weight:800
+}
+
+.rtd09-remove{
+    width:36px;
+    height:40px;
+    border:1px solid #714047;
+    background:#291518;
+    color:#ff8d98;
+    font-size:18px
+}
+
+.rtd09-add{
+    width:100%;
+    min-height:38px;
+    margin-bottom:10px;
+    border:1px dashed #6f8e00;
+    background:#142000;
+    color:#bdf143;
+    font-size:12px
 }
 
 .rtd05-save{
@@ -915,11 +1031,16 @@
     </div>
 
     <div class="rtd05-field">
-        <label>ITEM</label>
+        <label>DEPARTURE WATCHLIST</label>
 
-        <select id="rtd05-item">
-            <option>Xanax</option>
-        </select>
+        <div class="rtd09-watchlist" id="rtd09-watchlist"></div>
+
+        <button
+            type="button"
+            class="rtd09-add"
+            id="rtd09-add">
+            + LAND / ITEM HINZUFÜGEN
+        </button>
     </div>
 
     <div class="rtd05-field">
@@ -981,6 +1102,29 @@
             .getElementById("rtd05-save")
             .onclick = saveFromForm;
 
+        document
+            .getElementById("rtd09-add")
+            .onclick = () => {
+                const firstCountry =
+                    Object.keys(COUNTRY)
+                        .find(code => itemsForCountry(code).length) ||
+                    "can";
+
+                const firstItem =
+                    itemsForCountry(firstCountry)[0]?.name ||
+                    "Xanax";
+
+                settings.watches = [
+                    ...(settings.watches || []),
+                    {
+                        code: firstCountry,
+                        item: firstItem
+                    }
+                ];
+
+                renderWatchlistEditor();
+            };
+
         syncForm();
     }
 
@@ -994,42 +1138,96 @@
         document.getElementById("rtd05-buffer").value =
             settings.buffer;
 
-        const item = document.getElementById("rtd05-item");
-
-        if (
-            [...item.options].some(o => o.value === settings.item)
-        ) {
-            item.value = settings.item;
-        }
+        renderWatchlistEditor();
     }
 
-    function populateItems() {
-        const items = allItems();
-        const select = document.getElementById("rtd05-item");
+    function renderWatchlistEditor() {
+        const holder =
+            document.getElementById("rtd09-watchlist");
 
-        select.innerHTML = items
-            .map(
-                name =>
-                    `<option value="${esc(name)}">${esc(name)}</option>`
-            )
-            .join("");
-
-        if (
-            !items.some(
-                n =>
-                    n.toLowerCase() ===
-                    settings.item.toLowerCase()
-            )
-        ) {
-            settings.item =
-                items.includes("Xanax")
-                    ? "Xanax"
-                    : items[0];
-
-            saveSettings();
+        if (!holder) {
+            return;
         }
 
-        select.value = settings.item;
+        const watches =
+            Array.isArray(settings.watches)
+                ? settings.watches
+                : [];
+
+        if (!watches.length) {
+            holder.innerHTML =
+                '<div class="rtd05-empty" style="padding:10px 4px">Noch keine Kombination gewählt.</div>';
+            return;
+        }
+
+        holder.innerHTML = watches
+            .map((watch, index) => {
+                const countryOptions =
+                    Object.entries(COUNTRY)
+                        .filter(([code]) =>
+                            itemsForCountry(code).length
+                        )
+                        .map(([code, country]) =>
+                            `<option value="${code}" ${code === watch.code ? "selected" : ""}>${country.flag} ${esc(country.name)}</option>`
+                        )
+                        .join("");
+
+                const itemOptions =
+                    itemsForCountry(watch.code)
+                        .map(item =>
+                            `<option value="${esc(item.name)}" ${String(item.name).toLowerCase() === String(watch.item).toLowerCase() ? "selected" : ""}>${esc(item.name)}</option>`
+                        )
+                        .join("");
+
+                return `
+<div class="rtd09-watch-row" data-watch="${index}">
+    <select class="rtd09-country">${countryOptions}</select>
+    <select class="rtd09-item">${itemOptions}</select>
+    <button type="button" class="rtd09-remove" aria-label="Remove">×</button>
+</div>
+                `;
+            })
+            .join("");
+
+        holder
+            .querySelectorAll(".rtd09-watch-row")
+            .forEach(row => {
+                const index =
+                    Number(row.dataset.watch);
+
+                const countrySelect =
+                    row.querySelector(".rtd09-country");
+
+                const itemSelect =
+                    row.querySelector(".rtd09-item");
+
+                countrySelect.onchange = () => {
+                    const code =
+                        countrySelect.value;
+
+                    const firstItem =
+                        itemsForCountry(code)[0]?.name || "";
+
+                    settings.watches[index] = {
+                        code,
+                        item: firstItem
+                    };
+
+                    renderWatchlistEditor();
+                };
+
+                itemSelect.onchange = () => {
+                    settings.watches[index].item =
+                        itemSelect.value;
+                };
+
+                row
+                    .querySelector(".rtd09-remove")
+                    .onclick = () => {
+                        settings.watches.splice(index, 1);
+                        renderWatchlistEditor();
+                    };
+            });
     }
 
     async function saveFromForm() {
@@ -1038,11 +1236,6 @@
                 .getElementById("rtd05-token")
                 .value
                 .trim();
-
-        settings.item =
-            document
-                .getElementById("rtd05-item")
-                .value || "Xanax";
 
         settings.travel =
             document
@@ -1061,6 +1254,20 @@
                     )
                 )
             );
+
+        settings.watches =
+            Array.from(
+                document.querySelectorAll(
+                    "#rtd09-watchlist .rtd09-watch-row"
+                )
+            )
+                .map(row => ({
+                    code:
+                        row.querySelector(".rtd09-country")?.value,
+                    item:
+                        row.querySelector(".rtd09-item")?.value
+                }))
+                .filter(w => w.code && w.item);
 
         saveSettings();
 
@@ -1118,22 +1325,12 @@
 
             await loadShops(forceShops);
 
-            populateItems();
-
-            const dropdown =
-                document.getElementById("rtd05-item");
-
-            if (
-                dropdown &&
-                dropdown.value
-            ) {
-                settings.item = dropdown.value;
-                saveSettings();
-            }
+            ensureWatchlist();
+            renderWatchlistEditor();
 
             board.innerHTML = `
 <div class="rtd05-loading">
-    Reading forecasts for ${esc(settings.item)}…
+    Reading selected country / item forecasts…
 </div>
             `;
 
