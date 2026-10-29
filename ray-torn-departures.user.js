@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.8.0
+// @version      0.8.1
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -784,7 +784,7 @@
     .rtd08-time{font-size:11px}
     .rtd08-board-head{font-size:7px}
 }
-        `        `;
+        `;
 
         document.head.appendChild(s);
     }
