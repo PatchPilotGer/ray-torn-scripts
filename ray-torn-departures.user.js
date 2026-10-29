@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.8.1
+// @version      0.8.2
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -797,6 +797,54 @@
         );
     }
 
+    function findOracleAnchor() {
+        const candidates = Array.from(
+            document.querySelectorAll("div, section")
+        )
+            .filter(el => {
+                if (el.id === ID || el.closest("#" + ID)) {
+                    return false;
+                }
+
+                const text =
+                    (el.textContent || "")
+                        .replace(/\\s+/g, " ")
+                        .trim();
+
+                return (
+                    text.includes("Torn Oracle") &&
+                    text.includes("Ready to fly") &&
+                    text.includes("Trip kit packed")
+                );
+            })
+            .sort(
+                (a, b) =>
+                    (a.textContent || "").length -
+                    (b.textContent || "").length
+            );
+
+        return candidates[0] || null;
+    }
+
+    function placePanel(el) {
+        const oracle =
+            findOracleAnchor();
+
+        if (
+            oracle &&
+            oracle.parentElement
+        ) {
+            oracle.parentElement.insertBefore(
+                el,
+                oracle
+            );
+            return true;
+        }
+
+        placePanel(el);
+        return false;
+    }
+
     function createPanel() {
         if (document.getElementById(ID)) return;
 
@@ -1465,11 +1513,30 @@
 
     const observer =
         new MutationObserver(() => {
-            if (
-                location.href.includes("sid=travel") &&
-                !document.getElementById(ID)
-            ) {
+            if (!location.href.includes("sid=travel")) {
+                return;
+            }
+
+            const panel =
+                document.getElementById(ID);
+
+            if (!panel) {
                 init();
+                return;
+            }
+
+            const oracle =
+                findOracleAnchor();
+
+            if (
+                oracle &&
+                oracle.parentElement &&
+                panel.nextElementSibling !== oracle
+            ) {
+                oracle.parentElement.insertBefore(
+                    panel,
+                    oracle
+                );
             }
         });
 
