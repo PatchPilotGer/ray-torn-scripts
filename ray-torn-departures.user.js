@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.7.0
+// @version      0.8.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -42,6 +42,20 @@
         chi: { name: "China", flag: "🇨🇳", mins: [229, 160, 114, 69] },
         uae: { name: "UAE", flag: "🇦🇪", mins: [257, 180, 128, 77] },
         sou: { name: "South Africa", flag: "🇿🇦", mins: [282, 197, 141, 85] }
+    };
+
+    const AIRLINE = {
+        mex: "AM",
+        cay: "KX",
+        can: "AC",
+        haw: "HA",
+        uni: "BA",
+        arg: "AR",
+        swi: "LX",
+        jap: "JL",
+        chi: "CA",
+        uae: "EK",
+        sou: "SA"
     };
 
     const TRAVEL_INDEX = {
@@ -496,319 +510,281 @@
 #${ID}{
     width:100%;
     max-width:680px;
-    margin:12px auto;
-    background:#080d10;
-    border:1px solid #34424a;
-    border-radius:8px;
+    margin:10px auto;
+    background:#0a0f12;
+    border:1px solid #2c383f;
+    border-radius:6px;
     overflow:hidden;
-    color:#e6ae38;
-    font-family:"Courier New",monospace
+    color:#dfe6e8;
+    font-family:Arial,Helvetica,sans-serif
 }
 
-#${ID} *{
-    box-sizing:border-box
-}
+#${ID} *{box-sizing:border-box}
 
 .rtd05-head{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    gap:10px;
-    padding:16px 18px;
-    border-bottom:4px solid #dda931
+    gap:8px;
+    padding:10px 12px;
+    background:#141a1e;
+    border-bottom:4px solid #8fd400
 }
 
 .rtd05-title{
+    color:#9be000;
     font-size:18px;
-    font-weight:bold;
-    letter-spacing:3px
+    font-weight:800;
+    letter-spacing:1.2px
 }
 
-.rtd05-actions{
-    display:flex;
-    gap:8px
-}
+.rtd05-actions{display:flex;gap:6px}
 
 .rtd05-icon{
-    width:46px;
-    height:46px;
-    border:1px solid #485963;
-    border-radius:6px;
-    background:#11191e;
-    color:#e5ebee;
-    font-size:18px
+    width:38px;
+    height:38px;
+    border:1px solid #46525a;
+    border-radius:4px;
+    background:#171f24;
+    color:#edf1f2;
+    font-size:16px
 }
 
 .rtd05-status{
-    padding:8px 14px;
-    color:#65c98e;
+    padding:6px 10px;
+    color:#6fd18f;
     font-size:9px;
-    letter-spacing:1.4px;
-    border-bottom:1px solid #273238
+    letter-spacing:.8px;
+    border-bottom:1px solid #263038;
+    background:#0c1215
 }
 
-.rtd05-status.warn{
-    color:#e2aa4a
-}
-
-.rtd05-status.bad{
-    color:#df746b
-}
+.rtd05-status.warn{color:#d7aa46}
+.rtd05-status.bad{color:#df746b}
 
 .rtd05-settings{
     display:none;
-    padding:14px;
-    border-bottom:1px solid #303b40
+    padding:10px;
+    border-bottom:1px solid #303b40;
+    background:#0d1418
 }
 
-.rtd05-settings.open{
-    display:block
-}
+.rtd05-settings.open{display:block}
 
-.rtd05-field{
-    margin-bottom:12px
-}
-
-.rtd05-field:last-child{
-    margin-bottom:0
-}
+.rtd05-field{margin-bottom:9px}
+.rtd05-field:last-child{margin-bottom:0}
 
 .rtd05-field label{
     display:block;
-    margin-bottom:6px;
-    color:#77848b;
-    font-size:9px;
-    letter-spacing:2px
+    margin-bottom:4px;
+    color:#87949a;
+    font-size:8px;
+    letter-spacing:1.4px
 }
 
 .rtd05-field input,
 .rtd05-field select{
     width:100%;
-    min-height:48px;
+    min-height:42px;
     border:1px solid #45545d;
-    border-radius:5px;
-    background:#080d10;
+    border-radius:4px;
+    background:#0a0f12;
     color:#edf1f2;
-    padding:10px 12px;
-    font-size:15px
+    padding:8px 10px;
+    font-size:14px
 }
 
 .rtd05-save{
     width:100%;
-    min-height:46px;
-    margin-top:8px;
-    border:1px solid #987122;
-    border-radius:5px;
-    background:#312713;
-    color:#ffd263;
-    font-weight:bold;
-    font-size:13px
+    min-height:42px;
+    margin-top:6px;
+    border:1px solid #6f8e00;
+    border-radius:4px;
+    background:#263500;
+    color:#cfff4d;
+    font-weight:700;
+    font-size:12px
 }
 
-.rtd05-board{
-    padding:0
+.rtd08-board-head,
+.rtd08-row-main{
+    display:grid;
+    grid-template-columns:minmax(0,1.55fr) .72fr .72fr .82fr .66fr;
+    align-items:center;
+    gap:6px
 }
 
-.rtd05-row{
-    padding:12px 14px;
-    border-top:1px solid #232e33;
-    background:#0a1013
+.rtd08-board-head{
+    padding:7px 10px;
+    background:#9bd800;
+    color:#101511;
+    font-size:8px;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:.3px
 }
 
-.rtd05-row:first-child{
-    border-top:none
+.rtd08-row{
+    border-top:1px solid #2c353b;
+    background:#11171b
 }
 
-.rtd05-row:nth-child(even){
-    background:#0c1317
+.rtd08-row:nth-child(even){background:#151c21}
+
+.rtd08-row-main{
+    padding:8px 10px;
+    cursor:pointer;
+    min-height:46px
 }
 
-.rtd05-row-top{
+.rtd08-dest{
+    min-width:0;
     display:flex;
-    justify-content:space-between;
-    gap:10px;
-    align-items:flex-start
+    align-items:center;
+    gap:6px
 }
 
-.rtd05-destination{
-    min-width:0
+.rtd08-flag{font-size:16px;line-height:1}
+.rtd08-air{
+    flex:0 0 auto;
+    min-width:24px;
+    padding:2px 4px;
+    text-align:center;
+    font-size:8px;
+    font-weight:800;
+    color:#111;
+    background:#f2f2f2;
+    border-radius:2px
 }
 
-.rtd05-country{
-    color:#efbb49;
-    font-size:15px;
-    font-weight:bold;
+.rtd08-country{
+    min-width:0;
+    color:#f0d467;
+    font-size:11px;
+    font-weight:700;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis
 }
 
-.rtd05-item{
-    margin-top:2px;
-    color:#d8e0e3;
-    font-size:11px
+.rtd08-time{
+    color:#f1f3f4;
+    font-size:12px;
+    font-weight:700;
+    text-align:center
 }
 
-.rtd05-price{
-    color:#758188;
-    font-size:9px
-}
+.rtd08-restock{color:#f0d467}
 
-.rtd05-confidence{
-    flex:0 0 auto;
-    min-width:54px;
-    text-align:center;
-    padding:5px 7px;
-    border-radius:4px;
-    font-size:10px;
-    font-weight:bold;
-    border:1px solid #3a454b;
-    color:#8b989e;
-    background:#11181c
-}
-
-.rtd05-confidence.good{
-    color:#72dda0;
-    border-color:#3f7c58;
-    background:#12241a
-}
-
-.rtd05-confidence.mid{
-    color:#edc05d;
-    border-color:#816722;
-    background:#2b2413
-}
-
-.rtd05-confidence.low{
-    color:#e37c73;
-    border-color:#7c403c;
-    background:#2a1515
-}
-
-.rtd05-times{
-    display:grid;
-    grid-template-columns:1fr auto 1fr auto 1fr;
-    gap:5px;
-    align-items:center;
-    margin-top:11px
-}
-
-.rtd05-timebox{
-    min-width:0
-}
-
-.rtd05-time-label{
-    display:block;
-    color:#637178;
-    font-size:7px;
-    letter-spacing:1px;
-    margin-bottom:2px
-}
-
-.rtd05-time{
-    color:#f4ead1;
-    font-size:15px;
-    font-weight:bold
-}
-
-.rtd05-arrow{
-    color:#626f75;
-    font-size:12px
-}
-
-.rtd05-row-bottom{
+.rtd08-remark{
     display:flex;
-    justify-content:space-between;
+    justify-content:flex-end;
     align-items:center;
-    gap:10px;
-    margin-top:10px
+    gap:4px
 }
 
-.rtd05-countdown{
-    color:#7e8b91;
-    font-size:9px
+.rtd08-confidence{
+    min-width:34px;
+    text-align:center;
+    font-size:9px;
+    font-weight:800;
+    color:#8bf2a6
 }
 
 .rtd05-alarm{
-    flex:0 0 auto;
-    min-width:42px;
-    min-height:34px;
-    background:#302713;
-    color:#ffd363;
-    border:1px solid #8a6b25;
-    border-radius:4px;
-    padding:6px 9px;
+    width:30px;
+    height:30px;
+    min-width:30px;
+    min-height:30px;
+    padding:0;
+    border-radius:3px;
+    border:1px solid #6c7526;
+    background:#2a2a10;
+    color:#ffe16a;
     font-size:14px;
-    font-weight:bold
+    font-weight:700
 }
 
 .rtd05-alarm.armed{
-    background:#12261b;
+    background:#10251a;
     border-color:#3f8059;
     color:#73d99a
 }
 
-.rtd05-placeholder{
-    padding:14px;
-    border-top:1px solid #232e33;
-    color:#39464c;
+.rtd08-detail{
+    display:none;
+    padding:8px 10px 10px;
+    background:#0b1114;
+    border-top:1px solid #232c31
+}
+
+.rtd08-row.open .rtd08-detail{display:block}
+
+.rtd08-detail-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px 12px
+}
+
+.rtd08-detail-item{
     font-size:10px;
+    color:#c9d0d3
+}
+
+.rtd08-detail-item b{
+    color:#7e8b91;
+    font-size:8px;
+    text-transform:uppercase;
+    letter-spacing:.5px
+}
+
+.rtd08-countdown{
+    margin-top:7px;
+    color:#8f9ba0;
+    font-size:9px
+}
+
+.rtd05-placeholder{
+    padding:10px;
+    border-top:1px solid #232e33;
+    color:#455159;
+    font-size:9px;
     text-align:center
 }
 
 .rtd05-loading,
 .rtd05-empty{
-    padding:28px 18px;
+    padding:22px 14px;
     text-align:center;
     color:#879399;
-    line-height:1.7;
-    font-size:11px
+    line-height:1.5;
+    font-size:10px
 }
 
 .rtd05-foot{
     display:flex;
     justify-content:space-between;
     gap:10px;
-    padding:8px 12px;
-    color:#68757b;
+    padding:7px 10px;
+    color:#66747a;
     border-top:1px solid #283339;
     font-size:8px
 }
 
 @media(max-width:420px){
-
-    .rtd05-head{
-        padding:14px 12px
+    .rtd05-head{padding:9px 10px}
+    .rtd05-title{font-size:16px}
+    .rtd05-icon{width:36px;height:36px}
+    .rtd08-board-head,
+    .rtd08-row-main{
+        grid-template-columns:minmax(0,1.5fr) .72fr .72fr .82fr .7fr;
+        gap:4px
     }
-
-    .rtd05-title{
-        font-size:16px;
-        letter-spacing:2px
-    }
-
-    .rtd05-icon{
-        width:42px;
-        height:42px
-    }
-
-    .rtd05-row{
-        padding:11px 12px
-    }
-
-    .rtd05-country{
-        font-size:14px
-    }
-
-    .rtd05-time{
-        font-size:14px
-    }
-
-    .rtd05-confidence{
-        min-width:50px;
-        font-size:9px
-    }
+    .rtd08-country{font-size:10px}
+    .rtd08-time{font-size:11px}
+    .rtd08-board-head{font-size:7px}
 }
-        `;
+        `        `;
 
         document.head.appendChild(s);
     }
@@ -1121,6 +1097,16 @@
 
         const rows = [];
 
+        rows.push(`
+<div class="rtd08-board-head">
+    <div>TO</div>
+    <div style="text-align:center">BOARD</div>
+    <div style="text-align:center">LAND</div>
+    <div style="text-align:center">RESTOCK</div>
+    <div style="text-align:right">REMARKS</div>
+</div>
+        `);
+
         for (let i = 0; i < settings.rows; i++) {
             const r = boardRows[i];
 
@@ -1133,92 +1119,74 @@
                 continue;
             }
 
-            const confClass =
-                confidenceClass(r.confidence);
-
             rows.push(`
-<div class="rtd05-row">
+<div class="rtd08-row" data-row="${i}">
+    <div class="rtd08-row-main">
 
-    <div class="rtd05-row-top">
+        <div class="rtd08-dest">
+            <span class="rtd08-flag">${r.flag}</span>
+            <span class="rtd08-air">${esc(AIRLINE[r.code] || "")}</span>
+            <span class="rtd08-country">${esc(r.country)}</span>
+        </div>
 
-        <div class="rtd05-destination">
+        <div class="rtd08-time">
+            ${fmtTime(r.departureAt)}
+        </div>
 
-            <div class="rtd05-country">
-                ${r.flag} ${esc(r.country)}
-            </div>
+        <div class="rtd08-time">
+            ${fmtTime(r.landAt)}
+        </div>
 
-            <div class="rtd05-item">
+        <div class="rtd08-time rtd08-restock">
+            ${fmtTime(r.restockAt)}
+        </div>
+
+        <div class="rtd08-remark">
+            <span class="rtd08-confidence">
+                ${r.confidence == null ? "—" : r.confidence + "%"}
+            </span>
+
+            <button
+                class="rtd05-alarm"
+                data-row="${i}"
+                aria-label="Toggle boarding reminder">
+                🔔
+            </button>
+        </div>
+
+    </div>
+
+    <div class="rtd08-detail">
+
+        <div class="rtd08-detail-grid">
+
+            <div class="rtd08-detail-item">
+                <b>Item</b><br>
                 ${esc(r.itemName)}
-                <span class="rtd05-price">
-                    • $${Number(r.cost).toLocaleString()}
-                </span>
+            </div>
+
+            <div class="rtd08-detail-item">
+                <b>Price</b><br>
+                $${Number(r.cost).toLocaleString()}
+            </div>
+
+            <div class="rtd08-detail-item">
+                <b>Flight</b><br>
+                ${r.flightMin} min
+            </div>
+
+            <div class="rtd08-detail-item">
+                <b>Confidence</b><br>
+                ${r.confidence == null ? "—" : r.confidence + "%"}
             </div>
 
         </div>
 
-        <div class="rtd05-confidence ${confClass}">
-            ${r.confidence == null
-                ? "—"
-                : r.confidence + "%"
-            }
-        </div>
-
-    </div>
-
-    <div class="rtd05-times">
-
-        <div class="rtd05-timebox">
-            <span class="rtd05-time-label">
-                DEPART
-            </span>
-            <span class="rtd05-time">
-                ${fmtTime(r.departureAt)}
-            </span>
-        </div>
-
-        <div class="rtd05-arrow">
-            →
-        </div>
-
-        <div class="rtd05-timebox">
-            <span class="rtd05-time-label">
-                LAND
-            </span>
-            <span class="rtd05-time">
-                ${fmtTime(r.landAt)}
-            </span>
-        </div>
-
-        <div class="rtd05-arrow">
-            →
-        </div>
-
-        <div class="rtd05-timebox">
-            <span class="rtd05-time-label">
-                RESTOCK
-            </span>
-            <span class="rtd05-time">
-                ${fmtTime(r.restockAt)}
-            </span>
-        </div>
-
-    </div>
-
-    <div class="rtd05-row-bottom">
-
-        <div class="rtd05-countdown">
+        <div class="rtd08-countdown">
             Boarding in ${remaining(r.departureAt)}
-            • ${r.flightMin} min flight
         </div>
 
-        <button
-            class="rtd05-alarm"
-            data-row="${i}">
-            🔔
-        </button>
-
     </div>
-
 </div>
             `);
         }
@@ -1226,9 +1194,28 @@
         board.innerHTML = rows.join("");
 
         board
+            .querySelectorAll(".rtd08-row-main")
+            .forEach(main => {
+                main.onclick = event => {
+                    if (
+                        event.target.closest(".rtd05-alarm")
+                    ) {
+                        return;
+                    }
+
+                    main
+                        .closest(".rtd08-row")
+                        .classList
+                        .toggle("open");
+                };
+            });
+
+        board
             .querySelectorAll(".rtd05-alarm")
             .forEach(button => {
-                button.onclick = () => {
+                button.onclick = event => {
+                    event.stopPropagation();
+
                     const row =
                         boardRows[
                             Number(
