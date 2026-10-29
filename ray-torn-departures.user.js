@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.9.0
+// @version      0.9.1
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -831,6 +831,31 @@
     color:#8bf2a6
 }
 
+.rtd09-item-cell{
+    display:block;
+    max-width:100%;
+    color:#8bf2a6;
+    font-size:9px;
+    font-weight:800;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    text-align:right
+}
+
+.rtd09-detail-actions{
+    display:flex;
+    justify-content:flex-end;
+    margin-top:8px
+}
+
+.rtd09-detail-alarm{
+    width:38px;
+    height:34px;
+    min-width:38px;
+    min-height:34px
+}
+
 .rtd05-alarm{
     width:30px;
     height:30px;
@@ -1372,7 +1397,7 @@
     <div style="text-align:center">BOARD</div>
     <div style="text-align:center">LAND</div>
     <div style="text-align:center">RESTOCK</div>
-    <div style="text-align:right">REMARKS</div>
+    <div style="text-align:right">ITEM</div>
 </div>
         `);
 
@@ -1410,16 +1435,9 @@
         </div>
 
         <div class="rtd08-remark">
-            <span class="rtd08-confidence">
-                ${r.confidence == null ? "—" : r.confidence + "%"}
+            <span class="rtd09-item-cell">
+                ${esc(r.itemName)}
             </span>
-
-            <button
-                class="rtd05-alarm"
-                data-row="${i}"
-                aria-label="Toggle boarding reminder">
-                🔔
-            </button>
         </div>
 
     </div>
@@ -1454,6 +1472,15 @@
             ${boardingState(r.departureAt) === "late"
                 ? "Boarding passed " + remaining(r.departureAt)
                 : "Boarding in " + remaining(r.departureAt)}
+        </div>
+
+        <div class="rtd09-detail-actions">
+            <button
+                class="rtd05-alarm rtd09-detail-alarm"
+                data-row="${i}"
+                aria-label="Toggle boarding reminder">
+                🔔
+            </button>
         </div>
 
     </div>
