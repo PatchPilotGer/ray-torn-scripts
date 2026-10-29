@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.5.0
+// @version      0.6.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -1228,7 +1228,48 @@
             });
     }
 
-    function armAlarm(row, button) {
+    function notificationIdFor(row) {
+        const seed =
+            Math.floor(row.departureAt / 60000) +
+            String(row.code || "")
+                .split("")
+                .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+
+        return Math.abs(seed) % 10000;
+    }
+
+    async function pdaCall(handler, payload = {}) {
+        if (
+            !window.flutter_inappwebview ||
+            typeof window.flutter_inappwebview.callHandler !== "function"
+        ) {
+            throw new Error("TornPDA native handler unavailable");
+        }
+
+        return await window.flutter_inappwebview.callHandler(
+            handler,
+            payload
+        );
+    }
+
+    async function scheduleNativeNotification(row, alarmAt) {
+        const id = notificationIdFor(row);
+
+        return await pdaCall("scheduleNotification", {
+            title: `BOARDING • ${row.country}`,
+            subtitle: `${row.itemName} • Departure in 1 minute`,
+            id,
+            timestamp: alarmAt,
+            overwriteID: true,
+            launchNativeToast: true,
+            toastMessage: `Boarding reminder set for ${fmtTime(alarmAt)}`,
+            toastColor: "green",
+            toastDurationSeconds: 3,
+            urlCallback: "https://www.torn.com/page.php?sid=travel"
+        });
+    }
+
+    async function armAlarm(row, button) {
         const alarmAt =
             row.departureAt -
             60_000;
@@ -1244,20 +1285,80 @@
             return;
         }
 
-        button.textContent = "✓";
-        button.classList.add("armed");
+        const message =
+            `BOARDING • ${row.country} • ${row.itemName} • departure in 1 minute`;
 
-        setTimeout(
-            () => {
-                alert(
-                    `BOARDING • ${row.country}\n${row.itemName}\nDeparture in 1 minute`
+        button.disabled = true;
+        button.textContent = "…";
+
+        try {
+            let platform = "Unknown";
+
+            try {
+                const result =
+                    await pdaCall("getPlatform");
+
+                platform =
+                    result?.platform ||
+                    result ||
+                    "Unknown";
+            } catch {}
+
+            const under24Hours =
+                delay <= 24 * 60 * 60 * 1000;
+
+            if (
+                String(platform).toLowerCase().includes("android") &&
+                under24Hours
+            ) {
+                try {
+                    await pdaCall("setAlarm", {
+                        id: notificationIdFor(row),
+                        timestamp: alarmAt,
+                        vibrate: true,
+                        sound: true,
+                        message
+                    });
+                } catch {
+                    await scheduleNativeNotification(
+                        row,
+                        alarmAt
+                    );
+                }
+            } else {
+                await scheduleNativeNotification(
+                    row,
+                    alarmAt
                 );
+            }
 
-                button.textContent = "🔔";
-                button.classList.remove("armed");
-            },
-            delay
-        );
+            button.textContent = "✓";
+            button.classList.add("armed");
+
+        } catch (nativeError) {
+            console.warn(
+                "[Ray Departures] Native alarm failed, using page timer:",
+                nativeError
+            );
+
+            button.textContent = "✓";
+            button.classList.add("armed");
+
+            setTimeout(
+                () => {
+                    alert(
+                        `BOARDING • ${row.country}\n${row.itemName}\nDeparture in 1 minute`
+                    );
+
+                    button.textContent = "🔔";
+                    button.classList.remove("armed");
+                    button.disabled = false;
+                },
+                delay
+            );
+        } finally {
+            button.disabled = false;
+        }
     }
 
     async function init() {
