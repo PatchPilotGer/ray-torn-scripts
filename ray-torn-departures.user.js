@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.8.2
+// @version      0.8.3
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -411,7 +411,7 @@
                 landAt -
                 flightMin * 60_000;
 
-            if (departureAt <= now) {
+            if (departureAt <= now - 20 * 60_000) {
                 continue;
             }
 
@@ -484,13 +484,37 @@
     }
 
     function remaining(ms) {
-        const diff = Math.max(0, ms - Date.now());
+        const diff = ms - Date.now();
 
-        const mins = Math.floor(diff / 60000);
-        const h = Math.floor(mins / 60);
-        const m = mins % 60;
+        if (diff >= 0) {
+            const mins = Math.floor(diff / 60000);
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
 
-        return h ? `${h}h ${m}m` : `${m}m`;
+            return h ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        const lateMins = Math.floor(Math.abs(diff) / 60000);
+
+        return `+${lateMins}m`;
+    }
+
+    function boardingState(ms) {
+        const diff = ms - Date.now();
+
+        if (diff > 5 * 60_000) {
+            return "normal";
+        }
+
+        if (diff > 0) {
+            return "soon";
+        }
+
+        if (diff >= -20 * 60_000) {
+            return "late";
+        }
+
+        return "expired";
     }
 
     function confidenceClass(value) {
@@ -672,6 +696,25 @@
     font-size:12px;
     font-weight:700;
     text-align:center
+}
+
+.rtd08-time.boarding-soon{
+    background:#ffd900;
+    color:#111;
+    border-radius:3px;
+    padding:4px 2px;
+    animation:rtd08-blink 1s steps(2,start) infinite
+}
+
+.rtd08-time.boarding-late{
+    background:#b72222;
+    color:#fff;
+    border-radius:3px;
+    padding:4px 2px
+}
+
+@keyframes rtd08-blink{
+    50%{opacity:.35}
 }
 
 .rtd08-restock{color:#f0d467}
@@ -1177,7 +1220,7 @@
             <span class="rtd08-country">${esc(r.country)}</span>
         </div>
 
-        <div class="rtd08-time">
+        <div class="rtd08-time ${boardingState(r.departureAt) === "soon" ? "boarding-soon" : boardingState(r.departureAt) === "late" ? "boarding-late" : ""}">
             ${fmtTime(r.departureAt)}
         </div>
 
@@ -1231,7 +1274,9 @@
         </div>
 
         <div class="rtd08-countdown">
-            Boarding in ${remaining(r.departureAt)}
+            ${boardingState(r.departureAt) === "late"
+                ? "Boarding passed " + remaining(r.departureAt)
+                : "Boarding in " + remaining(r.departureAt)}
         </div>
 
     </div>
