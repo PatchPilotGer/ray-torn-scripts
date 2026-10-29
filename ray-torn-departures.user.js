@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.6.0
+// @version      0.7.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures.user.js
@@ -20,6 +20,7 @@
 
     const SETTINGS_KEY = "ray_departures_v05_settings";
     const SHOP_CACHE_KEY = "ray_departures_v05_shops";
+    const ARMED_KEY = "ray_departures_v07_armed";
 
     const DEFAULTS = {
         token: "",
@@ -305,7 +306,7 @@
         return Number.isNaN(parsed) ? null : parsed;
     }
 
-    async function getForecastRow(entry) {
+    async function getForecastRows(entry) {
         const { code, item, shop } = entry;
 
         const query =
@@ -322,48 +323,23 @@
         const restockBand = batch?.restocks?.[id] || null;
         const reason = batch?.reasons?.[id] || null;
 
-        let restock =
-            parseDate(restockBand?.p50) ||
-            parseDate(item.restock_at);
-
-        if (!restock && forecast?.upcoming?.length) {
-            const first = forecast.upcoming[0];
-
-            if (first?.anchors?.length) {
-                restock = parseDate(first.anchors[0]?.at);
-            } else {
-                restock = parseDate(first?.land_at);
-            }
-        }
-
-        if (!restock) {
-            return null;
+        if (!forecast?.upcoming?.length) {
+            return [];
         }
 
         const flightMin = flightMinutes(code);
 
         if (!flightMin) {
-            return null;
+            return [];
         }
 
-        const landAt =
-            restock -
-            settings.buffer * 60_000;
+        const now = Date.now();
+        const rows = [];
 
-        const departureAt =
-            landAt -
-            flightMin * 60_000;
+        for (let idx = 0; idx < forecast.upcoming.length; idx++) {
+            const w = forecast.upcoming[idx];
 
-        if (departureAt <= Date.now()) {
-            return null;
-        }
-
-        let confidence = null;
-        let shelf = null;
-
-        if (forecast?.upcoming?.length) {
-            const anchors = forecast.upcoming
-                .flatMap(w => w?.anchors || [])
+            const anchors = (w?.anchors || [])
                 .map(a => ({
                     at: parseDate(a.at),
                     hit: a.hit,
@@ -371,12 +347,23 @@
                 }))
                 .filter(a => a.at);
 
+            let landAt =
+                parseDate(w?.land_at) ||
+                parseDate(w?.land_by) ||
+                anchors[0]?.at ||
+                null;
+
+            let confidence = null;
+            let shelf = null;
+
             if (anchors.length) {
-                anchors.sort(
-                    (a, b) =>
-                        Math.abs(a.at - landAt) -
-                        Math.abs(b.at - landAt)
-                );
+                anchors.sort((a, b) => {
+                    const ah = a.hit == null ? -1 : Number(a.hit);
+                    const bh = b.hit == null ? -1 : Number(b.hit);
+                    return bh - ah;
+                });
+
+                landAt = anchors[0].at || landAt;
 
                 confidence =
                     anchors[0].hit != null
@@ -386,25 +373,55 @@
                 shelf =
                     anchors[0].shelf ?? null;
             }
+
+            if (!landAt) {
+                continue;
+            }
+
+            let restockAt = null;
+
+            if (idx === 0) {
+                restockAt =
+                    parseDate(restockBand?.p50) ||
+                    parseDate(item.restock_at) ||
+                    null;
+            }
+
+            if (!restockAt || restockAt <= landAt) {
+                restockAt =
+                    landAt +
+                    settings.buffer * 60_000;
+            }
+
+            const departureAt =
+                landAt -
+                flightMin * 60_000;
+
+            if (departureAt <= now) {
+                continue;
+            }
+
+            rows.push({
+                code,
+                country: COUNTRY[code].name,
+                flag: COUNTRY[code].flag,
+                itemName: item.name,
+                itemId: item.item_id,
+                stock: Number(item.quantity || 0),
+                cost: Number(item.cost || 0),
+                departureAt,
+                landAt,
+                restockAt,
+                flightMin,
+                confidence,
+                shelf,
+                reason: reason?.reason || null,
+                observedAt: shop?.observed_at || null,
+                forecastIndex: idx
+            });
         }
 
-        return {
-            code,
-            country: COUNTRY[code].name,
-            flag: COUNTRY[code].flag,
-            itemName: item.name,
-            itemId: item.item_id,
-            stock: Number(item.quantity || 0),
-            cost: Number(item.cost || 0),
-            departureAt,
-            landAt,
-            restockAt: restock,
-            flightMin,
-            confidence,
-            shelf,
-            reason: reason?.reason || null,
-            observedAt: shop?.observed_at || null
-        };
+        return rows;
     }
 
     async function buildBoard() {
@@ -415,15 +432,16 @@
             const batch = entries.slice(i, i + 2);
 
             const settled = await Promise.allSettled(
-                batch.map(getForecastRow)
+                batch.map(getForecastRows)
             );
 
             for (const r of settled) {
-                if (
-                    r.status === "fulfilled" &&
-                    r.value
-                ) {
-                    results.push(r.value);
+                if (r.status !== "fulfilled") {
+                    continue;
+                }
+
+                for (const row of r.value || []) {
+                    results.push(row);
                 }
             }
 
@@ -1226,6 +1244,8 @@
                     }
                 };
             });
+
+        syncAlarmButtons();
     }
 
     function notificationIdFor(row) {
@@ -1233,9 +1253,25 @@
             Math.floor(row.departureAt / 60000) +
             String(row.code || "")
                 .split("")
-                .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+                .reduce((sum, ch) => sum + ch.charCodeAt(0), 0) +
+            Number(row.forecastIndex || 0) * 97;
 
         return Math.abs(seed) % 10000;
+    }
+
+    function loadArmed() {
+        try {
+            return JSON.parse(localStorage.getItem(ARMED_KEY) || "{}");
+        } catch {
+            return {};
+        }
+    }
+
+    function saveArmed(map) {
+        localStorage.setItem(
+            ARMED_KEY,
+            JSON.stringify(map)
+        );
     }
 
     async function pdaCall(handler, payload = {}) {
@@ -1255,18 +1291,109 @@
     async function scheduleNativeNotification(row, alarmAt) {
         const id = notificationIdFor(row);
 
-        return await pdaCall("scheduleNotification", {
-            title: `BOARDING • ${row.country}`,
-            subtitle: `${row.itemName} • Departure in 1 minute`,
-            id,
-            timestamp: alarmAt,
-            overwriteID: true,
-            launchNativeToast: true,
-            toastMessage: `Boarding reminder set for ${fmtTime(alarmAt)}`,
-            toastColor: "green",
-            toastDurationSeconds: 3,
-            urlCallback: "https://www.torn.com/page.php?sid=travel"
-        });
+        const response = await pdaCall(
+            "scheduleNotification",
+            {
+                title: `BOARDING • ${row.country}`,
+                subtitle: `${row.itemName} • Departure in 1 minute`,
+                id,
+                timestamp: alarmAt,
+                overwriteID: true,
+                launchNativeToast: true,
+                toastMessage: `Boarding reminder set for ${fmtTime(alarmAt)}`,
+                toastColor: "green",
+                toastDurationSeconds: 3,
+                urlCallback: "https://www.torn.com/page.php?sid=travel"
+            }
+        );
+
+        const armed = loadArmed();
+        armed[id] = {
+            country: row.country,
+            item: row.itemName,
+            alarmAt,
+            departureAt: row.departureAt
+        };
+        saveArmed(armed);
+
+        return response;
+    }
+
+    async function cancelNativeNotification(row) {
+        const id = notificationIdFor(row);
+
+        try {
+            await pdaCall(
+                "cancelNotification",
+                { id }
+            );
+        } finally {
+            const armed = loadArmed();
+            delete armed[id];
+            saveArmed(armed);
+        }
+    }
+
+    async function isNotificationArmed(row) {
+        const id = notificationIdFor(row);
+        const armed = loadArmed();
+
+        if (!armed[id]) {
+            return false;
+        }
+
+        try {
+            const response =
+                await pdaCall(
+                    "getNotification",
+                    { id }
+                );
+
+            if (
+                response?.status === "success" ||
+                response?.data
+            ) {
+                return true;
+            }
+        } catch {}
+
+        delete armed[id];
+        saveArmed(armed);
+
+        return false;
+    }
+
+    async function syncAlarmButtons() {
+        const buttons =
+            document.querySelectorAll(
+                "#rtd05-board .rtd05-alarm"
+            );
+
+        for (const button of buttons) {
+            const index =
+                Number(button.dataset.row);
+
+            const row =
+                boardRows[index];
+
+            if (!row) {
+                continue;
+            }
+
+            const active =
+                await isNotificationArmed(row);
+
+            button.dataset.armed =
+                active ? "1" : "0";
+
+            button.textContent =
+                active ? "✓" : "🔔";
+
+            button.classList.toggle(
+                "armed",
+                active
+            );
+        }
     }
 
     async function armAlarm(row, button) {
@@ -1274,87 +1401,47 @@
             row.departureAt -
             60_000;
 
-        const delay =
-            alarmAt -
-            Date.now();
-
-        if (delay <= 0) {
+        if (alarmAt <= Date.now()) {
             alert(
                 `BOARDING • ${row.country}\nDepart now for ${row.itemName}`
             );
             return;
         }
 
-        const message =
-            `BOARDING • ${row.country} • ${row.itemName} • departure in 1 minute`;
-
         button.disabled = true;
-        button.textContent = "…";
 
         try {
-            let platform = "Unknown";
+            const currentlyArmed =
+                button.dataset.armed === "1" ||
+                await isNotificationArmed(row);
 
-            try {
-                const result =
-                    await pdaCall("getPlatform");
+            if (currentlyArmed) {
+                await cancelNativeNotification(row);
 
-                platform =
-                    result?.platform ||
-                    result ||
-                    "Unknown";
-            } catch {}
+                button.dataset.armed = "0";
+                button.textContent = "🔔";
+                button.classList.remove("armed");
 
-            const under24Hours =
-                delay <= 24 * 60 * 60 * 1000;
-
-            if (
-                String(platform).toLowerCase().includes("android") &&
-                under24Hours
-            ) {
-                try {
-                    await pdaCall("setAlarm", {
-                        id: notificationIdFor(row),
-                        timestamp: alarmAt,
-                        vibrate: true,
-                        sound: true,
-                        message
-                    });
-                } catch {
-                    await scheduleNativeNotification(
-                        row,
-                        alarmAt
-                    );
-                }
-            } else {
-                await scheduleNativeNotification(
-                    row,
-                    alarmAt
-                );
+                return;
             }
 
-            button.textContent = "✓";
-            button.classList.add("armed");
-
-        } catch (nativeError) {
-            console.warn(
-                "[Ray Departures] Native alarm failed, using page timer:",
-                nativeError
+            await scheduleNativeNotification(
+                row,
+                alarmAt
             );
 
+            button.dataset.armed = "1";
             button.textContent = "✓";
             button.classList.add("armed");
 
-            setTimeout(
-                () => {
-                    alert(
-                        `BOARDING • ${row.country}\n${row.itemName}\nDeparture in 1 minute`
-                    );
+        } catch (error) {
+            console.error(
+                "[Ray Departures] Notification toggle failed:",
+                error
+            );
 
-                    button.textContent = "🔔";
-                    button.classList.remove("armed");
-                    button.disabled = false;
-                },
-                delay
+            alert(
+                "Could not change boarding reminder."
             );
         } finally {
             button.disabled = false;
