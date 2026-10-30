@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.10.0
+// @version      0.10.1
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -27,6 +27,8 @@
         token: "",
         item: "Xanax",
         watches: null,
+        restockCountry: "can",
+        restockItem: "Xanax",
         travel: "standard",
         buffer: 5,
         rows: 5
@@ -661,37 +663,49 @@
     }
 
     async function buildRestockBoard() {
-        currentContextCode =
-            detectCountryContext();
+        const code =
+            settings.restockCountry;
 
-        if (!currentContextCode) {
+        currentContextCode = code;
+
+        if (!COUNTRY[code]) {
             restockRows = [];
             return;
         }
 
-        const entries =
-            watchEntries()
-                .filter(entry =>
-                    entry.code === currentContextCode
-                );
+        const shop =
+            shops?.[code];
 
-        const settled =
-            await Promise.allSettled(
-                entries.map(getRestockRow)
+        if (!shop) {
+            restockRows = [];
+            return;
+        }
+
+        const item =
+            (shop.items || []).find(
+                x =>
+                    String(x.name).toLowerCase() ===
+                    String(settings.restockItem).toLowerCase()
             );
 
-        restockRows =
-            settled
-                .filter(result =>
-                    result.status === "fulfilled"
-                )
-                .map(result => result.value)
-                .filter(Boolean)
-                .sort((a, b) => {
-                    if (!a.restockAt) return 1;
-                    if (!b.restockAt) return -1;
-                    return a.restockAt - b.restockAt;
+        if (!item) {
+            restockRows = [];
+            return;
+        }
+
+        try {
+            const row =
+                await getRestockRow({
+                    code,
+                    item,
+                    shop
                 });
+
+            restockRows =
+                row ? [row] : [];
+        } catch {
+            restockRows = [];
+        }
     }
 
     function fmtTime(ms) {
@@ -1134,6 +1148,27 @@
     letter-spacing:.3px
 }
 
+.rtd10-restock-controls{
+    display:grid;
+    grid-template-columns:1fr 1.35fr;
+    gap:7px;
+    padding:9px 10px;
+    background:#0d1418;
+    border-bottom:1px solid #303b40
+}
+
+.rtd10-restock-controls select{
+    width:100%;
+    min-width:0;
+    min-height:38px;
+    border:1px solid #45545d;
+    border-radius:4px;
+    background:#0a0f12;
+    color:#edf1f2;
+    padding:7px 8px;
+    font-size:12px
+}
+
 .rtd10-restock-grid-head,
 .rtd10-restock-row{
     display:grid;
@@ -1382,9 +1417,15 @@
 </div>
 
 <div class="rtd10-body" id="rtd10-restock-body">
+
+    <div class="rtd10-restock-controls">
+        <select id="rtd10-restock-country"></select>
+        <select id="rtd10-restock-item"></select>
+    </div>
+
     <div id="rtd10-restock-board">
         <div class="rtd05-empty">
-            Land wird automatisch erkannt, sobald du fliegst oder im Ausland bist.
+            Land und Item auswählen.
         </div>
     </div>
 </div>
@@ -1434,6 +1475,68 @@
 
         const collapseState =
             loadCollapseState();
+
+        const restockCountrySelect =
+            document.getElementById("rtd10-restock-country");
+
+        const restockItemSelect =
+            document.getElementById("rtd10-restock-item");
+
+        const populateRestockSelectors = () => {
+            restockCountrySelect.innerHTML =
+                Object.entries(COUNTRY)
+                    .filter(([code]) =>
+                        itemsForCountry(code).length
+                    )
+                    .map(([code, country]) =>
+                        `<option value="${code}" ${code === settings.restockCountry ? "selected" : ""}>${country.flag} ${esc(country.name)}</option>`
+                    )
+                    .join("");
+
+            const items =
+                itemsForCountry(settings.restockCountry);
+
+            if (
+                !items.some(item =>
+                    String(item.name).toLowerCase() ===
+                    String(settings.restockItem).toLowerCase()
+                )
+            ) {
+                settings.restockItem =
+                    items[0]?.name || "";
+            }
+
+            restockItemSelect.innerHTML =
+                items
+                    .map(item =>
+                        `<option value="${esc(item.name)}" ${String(item.name).toLowerCase() === String(settings.restockItem).toLowerCase() ? "selected" : ""}>${esc(item.name)}</option>`
+                    )
+                    .join("");
+        };
+
+        restockCountrySelect.onchange =
+            async () => {
+                settings.restockCountry =
+                    restockCountrySelect.value;
+
+                settings.restockItem =
+                    itemsForCountry(settings.restockCountry)[0]?.name || "";
+
+                saveSettings();
+                populateRestockSelectors();
+                await buildRestockBoard();
+                renderRestockBoard();
+            };
+
+        restockItemSelect.onchange =
+            async () => {
+                settings.restockItem =
+                    restockItemSelect.value;
+
+                saveSettings();
+                await buildRestockBoard();
+                renderRestockBoard();
+            };
 
         const applyCollapse = () => {
             const depBody =
@@ -1683,6 +1786,45 @@
             ensureWatchlist();
             renderWatchlistEditor();
 
+            const restockCountrySelect =
+                document.getElementById("rtd10-restock-country");
+
+            const restockItemSelect =
+                document.getElementById("rtd10-restock-item");
+
+            if (restockCountrySelect && restockItemSelect) {
+                restockCountrySelect.innerHTML =
+                    Object.entries(COUNTRY)
+                        .filter(([code]) =>
+                            itemsForCountry(code).length
+                        )
+                        .map(([code, country]) =>
+                            `<option value="${code}" ${code === settings.restockCountry ? "selected" : ""}>${country.flag} ${esc(country.name)}</option>`
+                        )
+                        .join("");
+
+                const restockItems =
+                    itemsForCountry(settings.restockCountry);
+
+                if (
+                    !restockItems.some(item =>
+                        String(item.name).toLowerCase() ===
+                        String(settings.restockItem).toLowerCase()
+                    )
+                ) {
+                    settings.restockItem =
+                        restockItems[0]?.name || "";
+                    saveSettings();
+                }
+
+                restockItemSelect.innerHTML =
+                    restockItems
+                        .map(item =>
+                            `<option value="${esc(item.name)}" ${String(item.name).toLowerCase() === String(settings.restockItem).toLowerCase() ? "selected" : ""}>${esc(item.name)}</option>`
+                        )
+                        .join("");
+            }
+
             board.innerHTML = `
 <div class="rtd05-loading">
     Reading selected country / item forecasts…
@@ -1885,12 +2027,12 @@
         context.textContent =
             country
                 ? `• ${country.flag} ${country.name}`
-                : "• Torn City";
+                : "";
 
         if (!country) {
             board.innerHTML = `
 <div class="rtd05-empty">
-    Sobald du fliegst oder im Ausland bist, erscheinen hier die Restocks deiner ausgewählten Items für dieses Land.
+    Land und Item auswählen.
 </div>
             `;
             return;
@@ -2168,13 +2310,7 @@
                 renderBoard();
             }
 
-            const detected =
-                detectCountryContext();
-
-            if (detected !== currentContextCode) {
-                await buildRestockBoard();
-            }
-
+            await buildRestockBoard();
             renderRestockBoard();
         }, 60_000);
     }
