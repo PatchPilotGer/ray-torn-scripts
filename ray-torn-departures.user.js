@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.9.1
+// @version      0.10.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -21,6 +21,7 @@
     const SETTINGS_KEY = "ray_departures_v05_settings";
     const SHOP_CACHE_KEY = "ray_departures_v05_shops";
     const ARMED_KEY = "ray_departures_v07_armed";
+    const COLLAPSE_KEY = "ray_departures_v10_collapse";
 
     const DEFAULTS = {
         token: "",
@@ -55,6 +56,8 @@
     let settings = loadSettings();
     let shops = {};
     let boardRows = [];
+    let restockRows = [];
+    let currentContextCode = null;
     let loading = false;
 
     function loadSettings() {
@@ -70,6 +73,71 @@
 
     function saveSettings() {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    }
+
+    function loadCollapseState() {
+        try {
+            return {
+                departures: false,
+                restocks: false,
+                ...JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "{}")
+            };
+        } catch {
+            return {
+                departures: false,
+                restocks: false
+            };
+        }
+    }
+
+    function saveCollapseState(state) {
+        localStorage.setItem(
+            COLLAPSE_KEY,
+            JSON.stringify(state)
+        );
+    }
+
+    function detectCountryContext() {
+        const sources = [
+            document.title || "",
+            ...Array.from(
+                document.querySelectorAll(
+                    "h1,h2,h3,h4,[class*='title'],[class*='heading']"
+                )
+            )
+                .filter(el => !el.closest("#" + ID))
+                .map(el => (el.textContent || "").trim())
+                .filter(Boolean)
+        ];
+
+        const normalized = sources
+            .map(text =>
+                text
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase()
+            );
+
+        for (const [code, country] of Object.entries(COUNTRY)) {
+            const name =
+                country.name.toLowerCase();
+
+            if (
+                normalized.some(text =>
+                    text === name ||
+                    text.includes("traveling to " + name) ||
+                    text.includes("travelling to " + name) ||
+                    text.includes("flying to " + name) ||
+                    text.includes("arriving in " + name) ||
+                    text.includes(" - " + name) ||
+                    text.includes("| " + name)
+                )
+            ) {
+                return code;
+            }
+        }
+
+        return null;
     }
 
     function esc(v) {
@@ -524,6 +592,108 @@
         boardRows = results.slice(0, settings.rows);
     }
 
+    async function getRestockRow(entry) {
+        const { code, item, shop } = entry;
+
+        const batch = await oracleGet(
+            "/forecasts/" +
+            code +
+            `?travel=${encodeURIComponent(settings.travel)}&floor=0.25&target=0.75`
+        );
+
+        const id = String(item.item_id);
+        const band = batch?.restocks?.[id] || null;
+        const forecast = batch?.forecasts?.[id] || null;
+
+        let restockAt =
+            parseDate(band?.p50) ||
+            parseDate(item.restock_at) ||
+            null;
+
+        let confidence = null;
+
+        const anchors =
+            (forecast?.upcoming || [])
+                .flatMap(window => window?.anchors || [])
+                .map(anchor => ({
+                    at: parseDate(anchor.at),
+                    hit: anchor.hit
+                }))
+                .filter(anchor => anchor.at)
+                .sort((a, b) => a.at - b.at);
+
+        if (
+            (!restockAt || restockAt < Date.now()) &&
+            anchors.length
+        ) {
+            restockAt =
+                anchors[0].at +
+                settings.buffer * 60_000;
+        }
+
+        if (anchors.length) {
+            const nearest =
+                anchors
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            Math.abs(a.at - (restockAt || a.at)) -
+                            Math.abs(b.at - (restockAt || b.at))
+                    )[0];
+
+            if (nearest?.hit != null) {
+                confidence =
+                    Math.round(Number(nearest.hit) * 100);
+            }
+        }
+
+        return {
+            code,
+            country: COUNTRY[code].name,
+            flag: COUNTRY[code].flag,
+            itemName: item.name,
+            stock: Number(item.quantity || 0),
+            cost: Number(item.cost || 0),
+            restockAt,
+            confidence,
+            observedAt: shop?.observed_at || null
+        };
+    }
+
+    async function buildRestockBoard() {
+        currentContextCode =
+            detectCountryContext();
+
+        if (!currentContextCode) {
+            restockRows = [];
+            return;
+        }
+
+        const entries =
+            watchEntries()
+                .filter(entry =>
+                    entry.code === currentContextCode
+                );
+
+        const settled =
+            await Promise.allSettled(
+                entries.map(getRestockRow)
+            );
+
+        restockRows =
+            settled
+                .filter(result =>
+                    result.status === "fulfilled"
+                )
+                .map(result => result.value)
+                .filter(Boolean)
+                .sort((a, b) => {
+                    if (!a.restockAt) return 1;
+                    if (!b.restockAt) return -1;
+                    return a.restockAt - b.restockAt;
+                });
+    }
+
     function fmtTime(ms) {
         return new Date(ms).toLocaleTimeString(
             [],
@@ -936,6 +1106,87 @@
     font-size:8px
 }
 
+.rtd10-toggle{
+    width:34px;
+    height:34px;
+    border:1px solid #46525a;
+    border-radius:4px;
+    background:#171f24;
+    color:#dfe6e8;
+    font-size:16px;
+    font-weight:800
+}
+
+.rtd10-body.collapsed{
+    display:none
+}
+
+.rtd10-restock-head{
+    border-top:1px solid #2c383f;
+    border-bottom:4px solid #8fd400
+}
+
+.rtd10-context{
+    margin-left:6px;
+    color:#d9e7b2;
+    font-size:9px;
+    font-weight:600;
+    letter-spacing:.3px
+}
+
+.rtd10-restock-grid-head,
+.rtd10-restock-row{
+    display:grid;
+    grid-template-columns:minmax(0,1.5fr) .9fr .7fr .8fr;
+    gap:6px;
+    align-items:center
+}
+
+.rtd10-restock-grid-head{
+    padding:7px 10px;
+    background:#9bd800;
+    color:#101511;
+    font-size:8px;
+    font-weight:800;
+    text-transform:uppercase
+}
+
+.rtd10-restock-row{
+    padding:9px 10px;
+    border-top:1px solid #2c353b;
+    background:#11171b
+}
+
+.rtd10-restock-row:nth-child(even){
+    background:#151c21
+}
+
+.rtd10-restock-item{
+    color:#f0d467;
+    font-size:11px;
+    font-weight:700;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis
+}
+
+.rtd10-restock-time{
+    color:#f1f3f4;
+    font-size:12px;
+    font-weight:700;
+    text-align:center
+}
+
+.rtd10-restock-stock,
+.rtd10-restock-conf{
+    text-align:right;
+    font-size:9px;
+    font-weight:800
+}
+
+.rtd10-restock-stock{color:#9fb0b6}
+.rtd10-restock-conf{color:#8bf2a6}
+
 @media(max-width:420px){
     .rtd05-head{padding:9px 10px}
     .rtd05-title{font-size:16px}
@@ -1027,6 +1278,10 @@
 
     <div class="rtd05-actions">
 
+        <button class="rtd10-toggle" id="rtd10-dep-toggle" aria-label="Departures ein-/ausklappen">
+            ▾
+        </button>
+
         <button class="rtd05-icon" id="rtd05-refresh">
             ↻
         </button>
@@ -1038,6 +1293,8 @@
     </div>
 
 </div>
+
+<div class="rtd10-body" id="rtd10-dep-body">
 
 <div class="rtd05-status warn" id="rtd05-status">
     Oracle token required
@@ -1106,6 +1363,31 @@
     <span>ORACLE FORECASTS</span>
     <span>BOARDING = -1 MIN</span>
 </div>
+
+</div>
+
+<div class="rtd05-head rtd10-restock-head">
+
+    <div class="rtd05-title">
+        ↻ RESTOCKS
+        <span class="rtd10-context" id="rtd10-context"></span>
+    </div>
+
+    <div class="rtd05-actions">
+        <button class="rtd10-toggle" id="rtd10-restock-toggle" aria-label="Restocks ein-/ausklappen">
+            ▾
+        </button>
+    </div>
+
+</div>
+
+<div class="rtd10-body" id="rtd10-restock-body">
+    <div id="rtd10-restock-board">
+        <div class="rtd05-empty">
+            Land wird automatisch erkannt, sobald du fliegst oder im Ausland bist.
+        </div>
+    </div>
+</div>
         `;
 
         host().prepend(el);
@@ -1150,6 +1432,54 @@
                 renderWatchlistEditor();
             };
 
+        const collapseState =
+            loadCollapseState();
+
+        const applyCollapse = () => {
+            const depBody =
+                document.getElementById("rtd10-dep-body");
+
+            const restockBody =
+                document.getElementById("rtd10-restock-body");
+
+            depBody.classList.toggle(
+                "collapsed",
+                collapseState.departures
+            );
+
+            restockBody.classList.toggle(
+                "collapsed",
+                collapseState.restocks
+            );
+
+            document.getElementById("rtd10-dep-toggle").textContent =
+                collapseState.departures ? "▸" : "▾";
+
+            document.getElementById("rtd10-restock-toggle").textContent =
+                collapseState.restocks ? "▸" : "▾";
+        };
+
+        document
+            .getElementById("rtd10-dep-toggle")
+            .onclick = () => {
+                collapseState.departures =
+                    !collapseState.departures;
+
+                saveCollapseState(collapseState);
+                applyCollapse();
+            };
+
+        document
+            .getElementById("rtd10-restock-toggle")
+            .onclick = () => {
+                collapseState.restocks =
+                    !collapseState.restocks;
+
+                saveCollapseState(collapseState);
+                applyCollapse();
+            };
+
+        applyCollapse();
         syncForm();
     }
 
@@ -1359,9 +1689,13 @@
 </div>
             `;
 
-            await buildBoard();
+            await Promise.all([
+                buildBoard(),
+                buildRestockBoard()
+            ]);
 
             renderBoard();
+            renderRestockBoard();
 
         } catch (e) {
             console.error(
@@ -1530,6 +1864,82 @@
             });
 
         syncAlarmButtons();
+    }
+
+    function renderRestockBoard() {
+        const board =
+            document.getElementById("rtd10-restock-board");
+
+        const context =
+            document.getElementById("rtd10-context");
+
+        if (!board || !context) {
+            return;
+        }
+
+        const country =
+            currentContextCode
+                ? COUNTRY[currentContextCode]
+                : null;
+
+        context.textContent =
+            country
+                ? `• ${country.flag} ${country.name}`
+                : "• Torn City";
+
+        if (!country) {
+            board.innerHTML = `
+<div class="rtd05-empty">
+    Sobald du fliegst oder im Ausland bist, erscheinen hier die Restocks deiner ausgewählten Items für dieses Land.
+</div>
+            `;
+            return;
+        }
+
+        if (!restockRows.length) {
+            board.innerHTML = `
+<div class="rtd05-empty">
+    Für ${esc(country.name)} ist aktuell kein Watchlist-Item mit verwertbarem Restock vorhanden.
+</div>
+            `;
+            return;
+        }
+
+        const rows = [
+            `
+<div class="rtd10-restock-grid-head">
+    <div>ITEM</div>
+    <div style="text-align:center">RESTOCK</div>
+    <div style="text-align:right">STOCK</div>
+    <div style="text-align:right">CONF.</div>
+</div>
+            `
+        ];
+
+        for (const row of restockRows) {
+            rows.push(`
+<div class="rtd10-restock-row">
+    <div class="rtd10-restock-item">
+        ${esc(row.itemName)}
+    </div>
+
+    <div class="rtd10-restock-time">
+        ${row.restockAt ? fmtTime(row.restockAt) : "—"}
+    </div>
+
+    <div class="rtd10-restock-stock">
+        ${Number(row.stock).toLocaleString()}
+    </div>
+
+    <div class="rtd10-restock-conf">
+        ${row.confidence == null ? "—" : row.confidence + "%"}
+    </div>
+</div>
+            `);
+        }
+
+        board.innerHTML =
+            rows.join("");
     }
 
     function notificationIdFor(row) {
@@ -1753,10 +2163,19 @@
                 .add("open");
         }
 
-        setInterval(() => {
+        setInterval(async () => {
             if (boardRows.length) {
                 renderBoard();
             }
+
+            const detected =
+                detectCountryContext();
+
+            if (detected !== currentContextCode) {
+                await buildRestockBoard();
+            }
+
+            renderRestockBoard();
         }, 60_000);
     }
 
