@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.9
+// @version      0.2.0
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -19,7 +19,7 @@
     const STORAGE_KEY = "targets";
     const FALLBACK_KEY = "ray_torn_targets_v01";
     const COLLAPSE_KEY = "ray_torn_targets_collapsed";
-    const API_KEY = "###PDA-APIKEY###";
+    const API_KEY = "_###PDA-APIKEY###_";
     const STATUS_TTL = 60 * 1000;
     const statusCache = new Map();
 
@@ -765,7 +765,12 @@
         }
 
         if (!API_KEY || API_KEY.includes("###PDA-APIKEY###")) {
-            return { state: "—", color: "gray", fetchedAt: Date.now() };
+            return {
+                state: "NO KEY",
+                color: "gray",
+                description: "TornPDA did not inject an API key",
+                fetchedAt: Date.now()
+            };
         }
 
         try {
