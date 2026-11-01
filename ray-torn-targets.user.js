@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.2.1
+// @version      0.2.2
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -764,7 +764,10 @@
             return cached;
         }
 
-        if (!API_KEY || API_KEY.includes("###PDA-APIKEY###")) {
+        const unresolvedPlaceholder =
+            API_KEY.includes("###PDA-" + "APIKEY###");
+
+        if (!API_KEY || unresolvedPlaceholder) {
             return {
                 state: "NO KEY",
                 color: "gray",
