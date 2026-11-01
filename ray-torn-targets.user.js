@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.3
+// @version      0.1.4
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -115,7 +115,7 @@
 .rt-table-head,
 .rt-row-main{
     display:grid;
-    grid-template-columns:minmax(0,1.2fr) .72fr minmax(0,1.5fr) 76px;
+    grid-template-columns:minmax(0,1.2fr) 44px .72fr minmax(0,1.5fr) 76px;
     gap:6px;
     align-items:center;
 }
@@ -164,6 +164,13 @@
     color:#77858b;
     font-size:8px;
     font-weight:500;
+}
+
+.rt-level{
+    font-size:10px;
+    font-weight:800;
+    color:#d7dde0;
+    text-align:center;
 }
 
 .rt-tag{
@@ -346,7 +353,7 @@
 
     .rt-table-head,
     .rt-row-main{
-        grid-template-columns:minmax(0,1.1fr) .68fr minmax(0,1.2fr) 70px;
+        grid-template-columns:minmax(0,1.05fr) 40px .62fr minmax(0,1.05fr) 70px;
         gap:4px;
     }
 
@@ -459,6 +466,34 @@
         }
 
         return "Player " + id;
+    }
+
+
+    function getProfileLevel() {
+        const textCandidates = Array.from(document.querySelectorAll("body *"))
+            .filter(el => {
+                const txt = (el.textContent || "").trim();
+                return /^Level\s*\d+$/i.test(txt) || /^\d+$/.test(txt);
+            });
+
+        // Prefer an element whose parent/nearby text contains "Level"
+        for (const el of textCandidates) {
+            const own = (el.textContent || "").trim();
+            const parentText = (el.parentElement?.textContent || "").trim();
+
+            const direct = parentText.match(/Level\s*(\d+)/i);
+            if (direct) return direct[1];
+
+            if (/^\d+$/.test(own)) {
+                const prev = el.previousElementSibling?.textContent?.trim() || "";
+                if (/^Level$/i.test(prev)) return own;
+            }
+        }
+
+        // Fallback: search visible profile text for "Level <number>"
+        const bodyText = document.body?.innerText || "";
+        const match = bodyText.match(/\bLevel\s*(\d{1,3})\b/i);
+        return match ? match[1] : "";
     }
 
     function isTargetsPage() {
@@ -593,7 +628,7 @@
         modalTarget = { ...target };
 
         document.getElementById("rt-modal-player").value =
-            `${target.name} [${target.id}]`;
+            `${target.name} [${target.id}]${target.level ? " • Level " + target.level : ""}`;
 
         document.getElementById("rt-modal-tag").value =
             target.tag && TAGS.includes(target.tag)
@@ -656,6 +691,7 @@
             openTargetModal({
                 id,
                 name: current?.name || getProfileName(id),
+                level: getProfileLevel() || current?.level || "",
                 tag: current?.tag || "Other",
                 note: current?.note || ""
             });
@@ -737,6 +773,10 @@
             <span class="rt-id">[${esc(target.id)}]</span>
         </div>
 
+        <div class="rt-level">
+            ${esc(target.level || "—")}
+        </div>
+
         <div class="rt-tag">
             ${esc(target.tag || "Other")}
         </div>
@@ -752,7 +792,8 @@
     </div>
 
     <div class="rt-detail">
-        <div><b>Notiz:</b> ${esc(target.note || "—")}</div>
+        <div><b>Level:</b> ${esc(target.level || "—")}</div>
+        <div style="margin-top:5px"><b>Notiz:</b> ${esc(target.note || "—")}</div>
         <div style="margin-top:5px"><b>Tag:</b> ${esc(target.tag || "Other")}</div>
 
         <div class="rt-detail-actions">
@@ -833,6 +874,7 @@
 
     <div class="rt-table-head">
         <div>PLAYER</div>
+        <div>LVL</div>
         <div>TAG</div>
         <div>NOTIZ</div>
         <div></div>
