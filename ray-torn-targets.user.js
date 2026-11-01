@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.7
+// @version      0.1.8
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -772,13 +772,15 @@
             const url =
                 "https://api.torn.com/v2/user/" +
                 encodeURIComponent(key) +
-                "/basic?key=" +
-                encodeURIComponent(API_KEY) +
-                "&comment=RayTargets";
+                "/basic?comment=RayTargets";
+
+            const headers = {
+                "Authorization": "ApiKey " + API_KEY
+            };
 
             const response = typeof PDA_httpGet === "function"
-                ? await PDA_httpGet(url)
-                : await fetch(url).then(async r => ({
+                ? await PDA_httpGet(url, headers)
+                : await fetch(url, { headers }).then(async r => ({
                     status: r.status,
                     responseText: await r.text()
                 }));
@@ -790,7 +792,9 @@
             const data = JSON.parse(response.responseText || "{}");
 
             if (data.error) {
-                throw new Error(data.error.error || data.error.code || "Torn API error");
+                const apiErr = new Error(data.error.error || "Torn API error");
+                apiErr.apiCode = data.error.code;
+                throw apiErr;
             }
 
             const status =
@@ -811,7 +815,17 @@
             return entry;
         } catch (e) {
             console.warn("[Ray Targets] status lookup failed for", id, e);
-            const entry = { state: "?", color: "gray", fetchedAt: Date.now() };
+            const label = e?.apiCode
+                ? "API " + e.apiCode
+                : "ERR";
+
+            const entry = {
+                state: label,
+                color: "gray",
+                description: e?.message || "API request failed",
+                fetchedAt: Date.now()
+            };
+
             statusCache.set(key, entry);
             return entry;
         }
