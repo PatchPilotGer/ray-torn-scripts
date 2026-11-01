@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.5
+// @version      0.1.6
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -788,7 +788,16 @@
             }
 
             const data = JSON.parse(response.responseText || "{}");
-            const status = data.status || data.user?.status || {};
+
+            if (data.error) {
+                throw new Error(data.error.error || data.error.code || "Torn API error");
+            }
+
+            const status =
+                data.profile?.status ||
+                data.user?.status ||
+                data.status ||
+                {};
 
             const entry = {
                 state: status.state || "—",
