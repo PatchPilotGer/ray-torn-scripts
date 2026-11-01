@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.2
+// @version      0.1.3
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -422,21 +422,43 @@
     }
 
     function getProfileName(id) {
-        const candidates = [
-            document.querySelector("h4"),
-            document.querySelector("h1"),
-            document.querySelector("[class*='profile'] [class*='name']"),
-            document.querySelector("[class*='title']")
-        ].filter(Boolean);
+        const selectors = [
+            "[class*='profile'] h1",
+            "[class*='profile'] h2",
+            "[class*='profile'] h3",
+            "[class*='profile'] h4",
+            "[class*='profile'] [class*='name']",
+            "[class*='user'] [class*='name']",
+            "[class*='title']"
+        ];
 
-        for (const el of candidates) {
-            const text = (el.textContent || "").trim();
-            if (text && !/profile/i.test(text)) {
-                return normalizeName(text, id);
+        const bad = /^(text based rpg|torn|profile|user information|actions)$/i;
+
+        for (const selector of selectors) {
+            for (const el of document.querySelectorAll(selector)) {
+                const text = normalizeName((el.textContent || "").trim(), id);
+                if (!text || bad.test(text)) continue;
+
+                // Torn profile headers often include "Name's Profile"
+                const profileMatch = text.match(/^(.+?)(?:'s|’s)\s+Profile$/i);
+                if (profileMatch?.[1]) {
+                    return normalizeName(profileMatch[1], id);
+                }
+
+                if (text.length <= 40) {
+                    return text;
+                }
             }
         }
 
-        return normalizeName(document.title, id);
+        // Fallback: visible heading in the page content, e.g. "Bexovoris' Profile"
+        for (const el of document.querySelectorAll("h1,h2,h3,h4")) {
+            const raw = (el.textContent || "").trim();
+            const match = raw.match(/^(.+?)(?:'s|’s)\s+Profile$/i);
+            if (match?.[1]) return normalizeName(match[1], id);
+        }
+
+        return "Player " + id;
     }
 
     function isTargetsPage() {
