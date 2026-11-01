@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.1
+// @version      0.1.2
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -18,6 +18,7 @@
     const PROFILE_BTN_ID = "ray-targets-profile-btn";
     const STORAGE_KEY = "targets";
     const FALLBACK_KEY = "ray_torn_targets_v01";
+    const COLLAPSE_KEY = "ray_torn_targets_collapsed";
 
     let targets = [];
     let modalTarget = null;
@@ -53,6 +54,29 @@
     padding:10px 12px;
     background:#151d22;
     border-bottom:4px solid #d4a72c;
+    cursor:pointer;
+    user-select:none;
+}
+
+.rt-head-right{
+    display:flex;
+    align-items:center;
+    gap:8px;
+}
+
+.rt-collapse{
+    width:30px;
+    height:30px;
+    border:1px solid #5b6870;
+    border-radius:4px;
+    background:#10171b;
+    color:#f2c24d;
+    font-size:16px;
+    font-weight:800;
+}
+
+#${ROOT_ID}.collapsed .rt-body{
+    display:none;
 }
 
 .rt-title{
@@ -421,13 +445,14 @@
         if (
             href.includes("sid=targets") ||
             href.includes("targets.php") ||
-            href.includes("targetlist")
+            href.includes("targetlist") ||
+            href.includes("targets-list")
         ) {
             return true;
         }
 
-        return Array.from(document.querySelectorAll("h1,h2,h3,h4"))
-            .some(el => /^targets?$/i.test((el.textContent || "").trim()));
+        return Array.from(document.querySelectorAll("h1,h2,h3,h4,[class*='title']"))
+            .some(el => /^(targets?|targets list)$/i.test((el.textContent || "").trim()));
     }
 
     function isProfilePage() {
@@ -616,11 +641,31 @@
     }
 
     function targetsPanelHost() {
-        return (
-            document.querySelector("#mainContainer") ||
-            document.querySelector("main") ||
-            document.body
-        );
+        const heading = Array.from(
+            document.querySelectorAll("h1,h2,h3,h4,[class*='title']")
+        ).find(el => /^(targets?|targets list)$/i.test((el.textContent || "").trim()));
+
+        if (heading) {
+            let section = heading.parentElement;
+            for (let i = 0; i < 4 && section; i++, section = section.parentElement) {
+                if (
+                    section.querySelector &&
+                    section.querySelector("table, [class*='target'], [class*='list']")
+                ) {
+                    return { mode: "before", node: section };
+                }
+            }
+
+            return { mode: "after", node: heading };
+        }
+
+        return {
+            mode: "prepend",
+            node:
+                document.querySelector("#mainContainer") ||
+                document.querySelector("main") ||
+                document.body
+        };
     }
 
     function filteredTargets() {
@@ -743,33 +788,59 @@
             root = document.createElement("section");
             root.id = ROOT_ID;
             root.innerHTML = `
-<div class="rt-head">
+<div class="rt-head" id="rt-collapse-head">
     <div>
         <div class="rt-title">🎯 RAY TARGETS</div>
         <div class="rt-count" id="rt-count"></div>
     </div>
+
+    <div class="rt-head-right">
+        <button class="rt-collapse" id="rt-collapse-btn" type="button">−</button>
+    </div>
 </div>
 
-<div class="rt-tools">
-    <input id="rt-search" type="search" placeholder="Name, ID oder Notiz suchen…">
+<div class="rt-body">
+    <div class="rt-tools">
+        <input id="rt-search" type="search" placeholder="Name, ID oder Notiz suchen…">
 
-    <select id="rt-filter-tag">
-        <option value="ALL">Alle Tags</option>
-        ${TAGS.map(tag => `<option value="${esc(tag)}">${esc(tag)}</option>`).join("")}
-    </select>
+        <select id="rt-filter-tag">
+            <option value="ALL">Alle Tags</option>
+            ${TAGS.map(tag => `<option value="${esc(tag)}">${esc(tag)}</option>`).join("")}
+        </select>
+    </div>
+
+    <div class="rt-table-head">
+        <div>PLAYER</div>
+        <div>TAG</div>
+        <div>NOTIZ</div>
+        <div></div>
+    </div>
+
+    <div id="rt-list"></div>
 </div>
-
-<div class="rt-table-head">
-    <div>PLAYER</div>
-    <div>TAG</div>
-    <div>NOTIZ</div>
-    <div></div>
-</div>
-
-<div id="rt-list"></div>
             `;
 
-            targetsPanelHost().prepend(root);
+            const targetHost = targetsPanelHost();
+
+            if (targetHost.mode === "before") {
+                targetHost.node.parentNode.insertBefore(root, targetHost.node);
+            } else if (targetHost.mode === "after") {
+                targetHost.node.insertAdjacentElement("afterend", root);
+            } else {
+                targetHost.node.prepend(root);
+            }
+
+            const collapsed = localStorage.getItem(COLLAPSE_KEY) === "1";
+            root.classList.toggle("collapsed", collapsed);
+            root.querySelector("#rt-collapse-btn").textContent = collapsed ? "+" : "−";
+
+            root.querySelector("#rt-collapse-head").onclick = event => {
+                if (event.target.closest("input,select")) return;
+                const next = !root.classList.contains("collapsed");
+                root.classList.toggle("collapsed", next);
+                root.querySelector("#rt-collapse-btn").textContent = next ? "+" : "−";
+                localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+            };
 
             root.querySelector("#rt-search").oninput = renderRows;
             root.querySelector("#rt-filter-tag").onchange = renderRows;
