@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.8
+// @version      0.1.9
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -772,7 +772,7 @@
             const url =
                 "https://api.torn.com/v2/user/" +
                 encodeURIComponent(key) +
-                "/basic?comment=RayTargets";
+                "/profile?comment=RayTargets";
 
             const headers = {
                 "Authorization": "ApiKey " + API_KEY
@@ -797,11 +797,8 @@
                 throw apiErr;
             }
 
-            const status =
-                data.profile?.status ||
-                data.user?.status ||
-                data.status ||
-                {};
+            const profile = data.profile || data.user || data || {};
+            const status = profile.status || {};
 
             const entry = {
                 state: status.state || "—",
