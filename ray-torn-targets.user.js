@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.4
+// @version      0.1.5
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -19,6 +19,9 @@
     const STORAGE_KEY = "targets";
     const FALLBACK_KEY = "ray_torn_targets_v01";
     const COLLAPSE_KEY = "ray_torn_targets_collapsed";
+    const API_KEY = "_###PDA-APIKEY###_";
+    const STATUS_TTL = 60 * 1000;
+    const statusCache = new Map();
 
     let targets = [];
     let modalTarget = null;
@@ -115,7 +118,7 @@
 .rt-table-head,
 .rt-row-main{
     display:grid;
-    grid-template-columns:minmax(0,1.2fr) 44px .72fr minmax(0,1.5fr) 76px;
+    grid-template-columns:minmax(0,1.05fr) 42px .65fr .78fr minmax(0,1.15fr) 72px;
     gap:6px;
     align-items:center;
 }
@@ -172,6 +175,22 @@
     color:#d7dde0;
     text-align:center;
 }
+
+.rt-status{
+    font-size:9px;
+    font-weight:800;
+    text-align:center;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.rt-status.okay{color:#75c83b}
+.rt-status.hospital{color:#ef7d83}
+.rt-status.traveling{color:#60c9d8}
+.rt-status.jail{color:#f0aa55}
+.rt-status.abroad{color:#60c9d8}
+.rt-status.other{color:#c6cdd0}
 
 .rt-tag{
     font-size:9px;
@@ -353,7 +372,7 @@
 
     .rt-table-head,
     .rt-row-main{
-        grid-template-columns:minmax(0,1.05fr) 40px .62fr minmax(0,1.05fr) 70px;
+        grid-template-columns:minmax(0,.95fr) 38px .58fr .72fr minmax(0,.9fr) 68px;
         gap:4px;
     }
 
@@ -726,6 +745,88 @@
         };
     }
 
+
+    function statusClass(state) {
+        const s = String(state || "").toLowerCase();
+        if (s === "okay") return "okay";
+        if (s === "hospital") return "hospital";
+        if (s === "traveling") return "traveling";
+        if (s === "abroad") return "abroad";
+        if (s === "jail") return "jail";
+        return "other";
+    }
+
+    async function fetchTargetStatus(id, force = false) {
+        const key = String(id);
+        const cached = statusCache.get(key);
+
+        if (!force && cached && (Date.now() - cached.fetchedAt) < STATUS_TTL) {
+            return cached;
+        }
+
+        if (!API_KEY || API_KEY.includes("###PDA-APIKEY###")) {
+            return { state: "—", color: "gray", fetchedAt: Date.now() };
+        }
+
+        try {
+            const url =
+                "https://api.torn.com/v2/user/" +
+                encodeURIComponent(key) +
+                "/basic?key=" +
+                encodeURIComponent(API_KEY) +
+                "&comment=RayTargets";
+
+            const response = typeof PDA_httpGet === "function"
+                ? await PDA_httpGet(url)
+                : await fetch(url).then(async r => ({
+                    status: r.status,
+                    responseText: await r.text()
+                }));
+
+            if (!response || Number(response.status) >= 400) {
+                throw new Error("HTTP " + (response?.status || "?"));
+            }
+
+            const data = JSON.parse(response.responseText || "{}");
+            const status = data.status || data.user?.status || {};
+
+            const entry = {
+                state: status.state || "—",
+                color: status.color || "gray",
+                description: status.description || "",
+                until: status.until ?? null,
+                fetchedAt: Date.now()
+            };
+
+            statusCache.set(key, entry);
+            return entry;
+        } catch (e) {
+            console.warn("[Ray Targets] status lookup failed for", id, e);
+            const entry = { state: "?", color: "gray", fetchedAt: Date.now() };
+            statusCache.set(key, entry);
+            return entry;
+        }
+    }
+
+    async function refreshVisibleStatuses(force = false) {
+        const root = document.getElementById(ROOT_ID);
+        if (!root || root.classList.contains("collapsed")) return;
+
+        const rows = Array.from(root.querySelectorAll(".rt-row[data-id]"));
+
+        // Sequential calls keep API traffic modest and predictable.
+        for (const row of rows) {
+            const id = row.dataset.id;
+            const el = row.querySelector(".rt-status");
+            if (!id || !el) continue;
+
+            const status = await fetchTargetStatus(id, force);
+            el.textContent = status.state || "—";
+            el.className = "rt-status " + statusClass(status.state);
+            if (status.description) el.title = status.description;
+        }
+    }
+
     function filteredTargets() {
         const root = document.getElementById(ROOT_ID);
         if (!root) return targets;
@@ -779,6 +880,10 @@
 
         <div class="rt-tag">
             ${esc(target.tag || "Other")}
+        </div>
+
+        <div class="rt-status other">
+            …
         </div>
 
         <div class="rt-note">
@@ -835,6 +940,8 @@
                 };
             });
         });
+
+        refreshVisibleStatuses(false);
     }
 
     function renderTargetsPanel() {
@@ -876,6 +983,7 @@
         <div>PLAYER</div>
         <div>LVL</div>
         <div>TAG</div>
+        <div>STATUS</div>
         <div>NOTIZ</div>
         <div></div>
     </div>
@@ -904,6 +1012,7 @@
                 root.classList.toggle("collapsed", next);
                 root.querySelector("#rt-collapse-btn").textContent = next ? "+" : "−";
                 localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+                if (!next) refreshVisibleStatuses(false);
             };
 
             root.querySelector("#rt-search").oninput = renderRows;
@@ -957,4 +1066,8 @@
     });
 
     window.addEventListener("popstate", scheduleRouteRender);
+
+    setInterval(() => {
+        if (isTargetsPage()) refreshVisibleStatuses(true);
+    }, STATUS_TTL);
 })();
