@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Targets
 // @namespace    ray.torn.targets
-// @version      0.1.0
+// @version      0.1.1
 // @description  Personal unlimited TornPDA target list with notes, tags and quick actions
 // @match        https://www.torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-targets.user.js
@@ -593,10 +593,17 @@
             host.prepend(btn);
         }
 
-        btn.classList.toggle("saved", !!current);
-        btn.textContent = current
+        const wantedSaved = !!current;
+        const wantedText = current
             ? "✓ In Ray Targets – Notiz bearbeiten"
             : "🎯 Zu Ray Targets hinzufügen";
+
+        if (btn.classList.contains("saved") !== wantedSaved) {
+            btn.classList.toggle("saved", wantedSaved);
+        }
+        if (btn.textContent !== wantedText) {
+            btn.textContent = wantedText;
+        }
 
         btn.onclick = () => {
             openTargetModal({
@@ -782,13 +789,31 @@
     routeRender();
 
     let lastUrl = location.href;
+    let renderTimer = null;
+
+    function scheduleRouteRender() {
+        if (renderTimer) clearTimeout(renderTimer);
+        renderTimer = setTimeout(() => {
+            renderTimer = null;
+            routeRender();
+        }, 250);
+    }
 
     const observer = new MutationObserver(() => {
-        if (location.href !== lastUrl) {
+        const urlChanged = location.href !== lastUrl;
+        if (urlChanged) {
             lastUrl = location.href;
+            scheduleRouteRender();
+            return;
         }
 
-        routeRender();
+        // Torn loads profile/target content dynamically. Only repair our UI
+        // if Torn replaced it; do not rerender in response to our own DOM changes.
+        if (isProfilePage() && !document.getElementById(PROFILE_BTN_ID)) {
+            scheduleRouteRender();
+        } else if (isTargetsPage() && !document.getElementById(ROOT_ID)) {
+            scheduleRouteRender();
+        }
     });
 
     observer.observe(document.documentElement, {
@@ -796,5 +821,5 @@
         subtree: true
     });
 
-    window.addEventListener("popstate", routeRender);
+    window.addEventListener("popstate", scheduleRouteRender);
 })();
