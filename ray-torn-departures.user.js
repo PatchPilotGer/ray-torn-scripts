@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.10.1
+// @version      0.10.2
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
@@ -22,6 +22,7 @@
     const SHOP_CACHE_KEY = "ray_departures_v05_shops";
     const ARMED_KEY = "ray_departures_v07_armed";
     const COLLAPSE_KEY = "ray_departures_v10_collapse";
+    const RESTOCK_ARMED_KEY = "ray_departures_v102_restock_armed";
 
     const DEFAULTS = {
         token: "",
@@ -29,6 +30,7 @@
         watches: null,
         restockCountry: "can",
         restockItem: "Xanax",
+        restockReminderMinutes: 1,
         travel: "standard",
         buffer: 5,
         rows: 5
@@ -1150,7 +1152,7 @@
 
 .rtd10-restock-controls{
     display:grid;
-    grid-template-columns:1fr 1.35fr;
+    grid-template-columns:1fr 1.25fr .85fr 42px;
     gap:7px;
     padding:9px 10px;
     background:#0d1418;
@@ -1167,6 +1169,28 @@
     color:#edf1f2;
     padding:7px 8px;
     font-size:12px
+}
+
+.rtd10-restock-alarm{
+    width:42px;
+    min-width:42px;
+    min-height:38px;
+    border:1px solid #6c7526;
+    border-radius:4px;
+    background:#2a2a10;
+    color:#ffe16a;
+    font-size:15px;
+    font-weight:800
+}
+
+.rtd10-restock-alarm.armed{
+    background:#10251a;
+    border-color:#3f8059;
+    color:#73d99a
+}
+
+.rtd10-restock-alarm:disabled{
+    opacity:.45
 }
 
 .rtd10-restock-grid-head,
@@ -1421,6 +1445,14 @@
     <div class="rtd10-restock-controls">
         <select id="rtd10-restock-country"></select>
         <select id="rtd10-restock-item"></select>
+        <select id="rtd10-restock-timer" aria-label="Restock reminder">
+            <option value="0">Timer aus</option>
+            <option value="1">1 Min vorher</option>
+            <option value="2">2 Min vorher</option>
+            <option value="5">5 Min vorher</option>
+            <option value="10">10 Min vorher</option>
+        </select>
+        <button type="button" class="rtd10-restock-alarm" id="rtd10-restock-alarm" aria-label="Restock reminder aktivieren">🔔</button>
     </div>
 
     <div id="rtd10-restock-board">
@@ -1482,6 +1514,15 @@
         const restockItemSelect =
             document.getElementById("rtd10-restock-item");
 
+        const restockTimerSelect =
+            document.getElementById("rtd10-restock-timer");
+
+        const restockAlarmButton =
+            document.getElementById("rtd10-restock-alarm");
+
+        restockTimerSelect.value =
+            String(settings.restockReminderMinutes ?? 1);
+
         const populateRestockSelectors = () => {
             restockCountrySelect.innerHTML =
                 Object.entries(COUNTRY)
@@ -1516,6 +1557,7 @@
 
         restockCountrySelect.onchange =
             async () => {
+                await cancelCurrentRestockReminder();
                 settings.restockCountry =
                     restockCountrySelect.value;
 
@@ -1530,6 +1572,7 @@
 
         restockItemSelect.onchange =
             async () => {
+                await cancelCurrentRestockReminder();
                 settings.restockItem =
                     restockItemSelect.value;
 
@@ -1537,6 +1580,18 @@
                 await buildRestockBoard();
                 renderRestockBoard();
             };
+
+        restockTimerSelect.onchange = async () => {
+            await cancelCurrentRestockReminder();
+            settings.restockReminderMinutes =
+                Math.max(0, Number(restockTimerSelect.value || 0));
+            saveSettings();
+            syncRestockAlarmButton();
+        };
+
+        restockAlarmButton.onclick = async () => {
+            await toggleRestockReminder(restockAlarmButton);
+        };
 
         const applyCollapse = () => {
             const depBody =
@@ -2082,6 +2137,181 @@
 
         board.innerHTML =
             rows.join("");
+
+        syncRestockAlarmButton();
+    }
+
+    function restockNotificationId(row, minutesBefore) {
+        const seed =
+            Math.floor(Number(row.restockAt || 0) / 60000) +
+            String(row.code || "")
+                .split("")
+                .reduce((sum, ch) => sum + ch.charCodeAt(0), 0) +
+            String(row.itemName || "")
+                .split("")
+                .reduce((sum, ch) => sum + ch.charCodeAt(0), 0) +
+            Number(minutesBefore || 0) * 131;
+
+        return 10000 + (Math.abs(seed) % 10000);
+    }
+
+    function loadRestockArmed() {
+        try {
+            return JSON.parse(
+                localStorage.getItem(RESTOCK_ARMED_KEY) || "null"
+            );
+        } catch {
+            return null;
+        }
+    }
+
+    function saveRestockArmed(value) {
+        if (!value) {
+            localStorage.removeItem(RESTOCK_ARMED_KEY);
+            return;
+        }
+
+        localStorage.setItem(
+            RESTOCK_ARMED_KEY,
+            JSON.stringify(value)
+        );
+    }
+
+    async function cancelCurrentRestockReminder() {
+        const armed = loadRestockArmed();
+        if (!armed?.id) {
+            saveRestockArmed(null);
+            return;
+        }
+
+        try {
+            await pdaCall(
+                "cancelNotification",
+                { id: armed.id }
+            );
+        } catch {}
+
+        saveRestockArmed(null);
+        syncRestockAlarmButton();
+    }
+
+    async function syncRestockAlarmButton() {
+        const button =
+            document.getElementById("rtd10-restock-alarm");
+
+        const select =
+            document.getElementById("rtd10-restock-timer");
+
+        if (!button || !select) return;
+
+        const minutesBefore =
+            Math.max(0, Number(settings.restockReminderMinutes || 0));
+
+        select.value = String(minutesBefore);
+
+        const row = restockRows[0];
+        const armed = loadRestockArmed();
+
+        const same =
+            !!row?.restockAt &&
+            !!armed &&
+            Number(armed.restockAt) === Number(row.restockAt) &&
+            String(armed.code) === String(row.code) &&
+            String(armed.itemName) === String(row.itemName) &&
+            Number(armed.minutesBefore) === minutesBefore;
+
+        button.disabled =
+            !row?.restockAt || minutesBefore <= 0;
+
+        button.dataset.armed =
+            same ? "1" : "0";
+
+        button.textContent =
+            same ? "✓" : "🔔";
+
+        button.classList.toggle(
+            "armed",
+            same
+        );
+    }
+
+    async function toggleRestockReminder(button) {
+        const row = restockRows[0];
+        const minutesBefore =
+            Math.max(0, Number(settings.restockReminderMinutes || 0));
+
+        if (!row?.restockAt || minutesBefore <= 0) {
+            return;
+        }
+
+        if (button.dataset.armed === "1") {
+            await cancelCurrentRestockReminder();
+            return;
+        }
+
+        await cancelCurrentRestockReminder();
+
+        const alarmAt =
+            row.restockAt -
+            minutesBefore * 60_000;
+
+        if (alarmAt <= Date.now()) {
+            alert(
+                `RESTOCK • ${row.country}\n${row.itemName} is due now / very soon.`
+            );
+            return;
+        }
+
+        const id =
+            restockNotificationId(
+                row,
+                minutesBefore
+            );
+
+        try {
+            button.disabled = true;
+
+            await pdaCall(
+                "scheduleNotification",
+                {
+                    title: `RESTOCK • ${row.country}`,
+                    subtitle: `${row.itemName} • in ${minutesBefore} min`,
+                    id,
+                    timestamp: alarmAt,
+                    overwriteID: true,
+                    launchNativeToast: true,
+                    toastMessage:
+                        `Restock reminder set for ${fmtTime(alarmAt)}`,
+                    toastColor: "green",
+                    toastDurationSeconds: 3,
+                    urlCallback:
+                        "https://www.torn.com/page.php?sid=travel"
+                }
+            );
+
+            saveRestockArmed({
+                id,
+                code: row.code,
+                country: row.country,
+                itemName: row.itemName,
+                restockAt: row.restockAt,
+                minutesBefore,
+                alarmAt
+            });
+
+        } catch (error) {
+            console.error(
+                "[Ray Departures] Restock reminder failed:",
+                error
+            );
+
+            alert(
+                "Could not set restock reminder."
+            );
+        } finally {
+            button.disabled = false;
+            syncRestockAlarmButton();
+        }
     }
 
     function notificationIdFor(row) {
