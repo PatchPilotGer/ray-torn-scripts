@@ -2577,7 +2577,9 @@
     let domCheckScheduled = false;
 
     async function init() {
-        if (!isTravelPage() || initializing || !document.body) return;
+        // Torn sometimes renders the page shell before its scrollable
+        // content-wrapper. Wait for a real inline mounting point.
+        if (!isTravelPage() || initializing || !document.body || !contentRoot()) return;
         initializing = true;
 
         try {
