@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.11.1
+// @version      0.11.2
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/*
 // @match        https://torn.com/*
@@ -1273,32 +1273,52 @@
         );
     }
 
-    // Inline layout: the board sits after Torn's status bars, immediately
-    // before Torn Oracle (or above the Travel heading when Oracle is absent).
-    // Match both the pack prompt and the in-flight self-hospital prompt.
-    function findOracleAnchor() {
-        return Array.from(document.querySelectorAll("div, section, article"))
-            .filter(el => {
-                if (el.id === ID || el.closest("#" + ID)) return false;
-                const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-                return text.length < 1000 &&
-                    text.includes("Torn Oracle") &&
-                    /Pack\b|Ready to fly|Trip kit packed|Self-hosp|\bSkip\b/i.test(text);
-            })
-            .sort((a, b) =>
-                (a.textContent || "").length - (b.textContent || "").length
-            )[0] || null;
+    // Mount in Torn's actual scrolling content, NOT the Torn Oracle card.
+    // The Oracle container can become sticky while traveling.
+    function isPinnedContainer(el) {
+        let node = el;
+        while (node && node !== document.documentElement) {
+            try {
+                const position = window.getComputedStyle(node).position;
+                if (position === "fixed" || position === "sticky") return true;
+            } catch { /* Early injection can precede stylesheet readiness */ }
+            node = node.parentElement;
+        }
+        return false;
     }
 
-    function findTravelHeading() {
-        return Array.from(document.querySelectorAll("h1,h2,h3,h4"))
-            .find(el => /^(travel agency|traveling|travelling)$/i.test(
+    function contentRoot() {
+        // Torn's content-wrapper starts below the Energy/Nerve/Money bars.
+        const roots = [
+            document.querySelector("#mainContainer > .content-wrapper"),
+            document.querySelector("#mainContainer .content-wrapper"),
+            document.querySelector(".content-wrapper"),
+            document.querySelector("#mainContainer [role='main']"),
+            document.querySelector("[role='main']"),
+            document.querySelector("main")
+        ];
+
+        for (const root of roots) {
+            if (root && !root.closest("#" + ID) && !isPinnedContainer(root)) {
+                return root;
+            }
+        }
+
+        // Fallback: locate Torn's genuine travel page title (never Oracle).
+        const title = Array.from(document.querySelectorAll(
+            ".content-title, [class*='titleContainer'], h1, h2, h3, h4"
+        )).find(el =>
+            !el.closest("#" + ID) &&
+            /^(travel agency|traveling|travelling)$/i.test(
                 (el.textContent || "").trim()
-            )) || null;
+            ) &&
+            el.parentElement && !isPinnedContainer(el.parentElement)
+        );
+        return title?.parentElement || null;
     }
 
     function installInlineLayout() {
-        // Clean up any UI left by the previous floating version.
+        // Remove old floating UI if still present after an in-app update.
         document.getElementById("rtd11-launcher")?.remove();
         document.getElementById("rtd11-dock-style")?.remove();
 
@@ -1307,47 +1327,37 @@
         style.id = "rtd11-inline-style";
         style.textContent = `
 #${ID}{
-    position:relative!important;
+    position:static!important;
     display:block!important;
+    float:none!important;
     top:auto!important;
     bottom:auto!important;
     left:auto!important;
     right:auto!important;
+    inset:auto!important;
     z-index:auto!important;
+    transform:none!important;
     width:calc(100% - 20px)!important;
     max-width:680px!important;
     max-height:none!important;
-    overflow:visible!important;
+    overflow:hidden!important;
     margin:12px auto!important;
     clear:both!important;
     box-shadow:none!important;
 }
 #${ID}.rtd11-open{display:block!important}
 `;
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     }
 
     function placePanel(panel) {
-        const oracle = findOracleAnchor();
-        if (oracle?.parentElement && !panel.contains(oracle)) {
-            oracle.parentElement.insertBefore(panel, oracle);
-            return true;
+        const root = contentRoot();
+        if (!root) return false;
+        // Never attach to body root or an Oracle-controlled sticky element.
+        if (panel.parentElement !== root) {
+            root.insertBefore(panel, root.firstChild);
         }
-
-        // The Oracle block is optional and may load late. When it isn't
-        // present, anchor before the actual travel-page heading instead.
-        const heading = findTravelHeading();
-        if (heading?.parentElement) {
-            const section = heading.closest("section");
-            const target = section && section !== document.body ? section : heading;
-            if (target.parentElement && !panel.contains(target)) {
-                target.parentElement.insertBefore(panel, target);
-                return true;
-            }
-        }
-
-        host().prepend(panel);
-        return false;
+        return true;
     }
 
     function createPanel() {
@@ -2616,15 +2626,11 @@
             return;
         }
 
-        // Torn/Oracle can redraw sections after initial load. Restore the
-        // natural document position without turning the board into an overlay.
-        const oracle = findOracleAnchor();
-        if (oracle?.parentElement && !panel.contains(oracle) &&
-            (panel.parentElement !== oracle.parentElement ||
-             panel.nextElementSibling !== oracle)) {
-            oracle.parentElement.insertBefore(panel, oracle);
-        } else if (!panel.isConnected) {
-            placePanel(panel);
+        // Reattach only if Torn replaced its content wrapper or a previous
+        // version left the panel inside an Oracle/sticky container.
+        const root = contentRoot();
+        if (root && panel.parentElement !== root) {
+            root.insertBefore(panel, root.firstChild);
         }
     }
 
