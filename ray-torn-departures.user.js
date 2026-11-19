@@ -1,12 +1,10 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.10.3
+// @version      0.10.4
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
-// @match        https://www.torn.com/page.php?sid=travel*
-// @match        https://www.torn.com/travelagency.php*
-// @match        https://torn.com/page.php?sid=travel*
-// @match        https://torn.com/travelagency.php*
+// @match        https://www.torn.com/*
+// @match        https://torn.com/*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
 // @downloadURL  https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
 // @run-at       document-end
@@ -2498,76 +2496,110 @@
         }
     }
 
+    // Torn can navigate between views without reloading the browser tab.
+    // Match all Torn pages in metadata, but do work only on Travel Agency.
     function isTravelPage() {
-        return location.pathname.endsWith("/travelagency.php") ||
-            (location.pathname.endsWith("/page.php") &&
-                new URLSearchParams(location.search).get("sid") === "travel");
+        const path = location.pathname.toLowerCase();
+
+        if (path.endsWith("/travelagency.php")) return true;
+        if (path.endsWith("/page.php") &&
+            new URLSearchParams(location.search).get("sid") === "travel") {
+            return true;
+        }
+
+        // Some in-app navigation paths keep the old URL temporarily.
+        // Detect the actual page heading, not the left-hand navigation links.
+        return Array.from(document.querySelectorAll("h1,h2,h3,h4")).some(
+            el => /^travel agency$/i.test((el.textContent || "").trim())
+        );
     }
+
+    let initializing = false;
+    let intervalStarted = false;
+    let domCheckScheduled = false;
 
     async function init() {
-        if (!isTravelPage()) return;
+        if (!isTravelPage() || initializing || !document.body) return;
+        initializing = true;
 
-        createPanel();
+        try {
+            createPanel();
 
-        if (
-            settings.token &&
-            settings.token.startsWith("orc_")
-        ) {
-            await refresh(false);
-        } else {
-            document
-                .getElementById("rtd05-settings")
-                .classList
-                .add("open");
-        }
-
-        setInterval(async () => {
-            if (boardRows.length) {
-                renderBoard();
+            if (settings.token && settings.token.startsWith("orc_")) {
+                await refresh(false);
+            } else {
+                document.getElementById("rtd05-settings")?.classList.add("open");
             }
 
-            await buildRestockBoard();
-            renderRestockBoard();
-        }, 60_000);
+            if (!intervalStarted) {
+                intervalStarted = true;
+                setInterval(async () => {
+                    if (!isTravelPage() || !document.getElementById(ID)) return;
+                    try {
+                        if (boardRows.length) renderBoard();
+                        await buildRestockBoard();
+                        renderRestockBoard();
+                    } catch (error) {
+                        console.warn("[Ray Departures] Refresh timer:", error);
+                    }
+                }, 60_000);
+            }
+        } catch (error) {
+            console.error("[Ray Departures] Initialization error:", error);
+            const status = document.getElementById("rtd05-status");
+            if (status) {
+                status.textContent = "DEPARTURES ERROR: " +
+                    String(error?.message || error);
+                status.className = "rtd05-status bad";
+            }
+        } finally {
+            initializing = false;
+        }
     }
 
-    const observer =
-        new MutationObserver(() => {
-            if (!isTravelPage()) {
-                return;
+    function ensurePanel() {
+        if (!isTravelPage()) return;
+
+        const panel = document.getElementById(ID);
+        if (!panel) {
+            void init();
+            return;
+        }
+
+        // Reposition the board if the Torn/Oracle UI was rendered later.
+        const oracle = findOracleAnchor();
+        if (oracle && oracle.parentElement &&
+            !panel.contains(oracle) &&
+            panel.nextElementSibling !== oracle) {
+            oracle.parentElement.insertBefore(panel, oracle);
+        }
+    }
+
+    const observer = new MutationObserver(() => {
+        if (domCheckScheduled) return;
+        domCheckScheduled = true;
+        setTimeout(() => {
+            domCheckScheduled = false;
+            try {
+                ensurePanel();
+            } catch (error) {
+                console.warn("[Ray Departures] DOM check:", error);
             }
+        }, 200);
+    });
 
-            const panel =
-                document.getElementById(ID);
-
-            if (!panel) {
-                init();
-                return;
-            }
-
-            const oracle =
-                findOracleAnchor();
-
-            if (
-                oracle &&
-                oracle.parentElement &&
-                panel.nextElementSibling !== oracle
-            ) {
-                oracle.parentElement.insertBefore(
-                    panel,
-                    oracle
-                );
-            }
-        });
-
-    observer.observe(
-        document.documentElement,
-        {
+    function boot() {
+        observer.observe(document.documentElement, {
             childList: true,
             subtree: true
-        }
-    );
+        });
+        void init();
+    }
 
-    init();
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", boot, { once: true });
+    } else {
+        boot();
+    }
 
 })();
