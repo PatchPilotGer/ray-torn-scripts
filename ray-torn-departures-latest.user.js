@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.10.2
+// @version      0.10.3
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/page.php?sid=travel*
+// @match        https://www.torn.com/travelagency.php*
+// @match        https://torn.com/page.php?sid=travel*
+// @match        https://torn.com/travelagency.php*
 // @updateURL    https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
 // @downloadURL  https://raw.githubusercontent.com/PatchPilotGer/ray-torn-scripts/main/ray-torn-departures-latest.user.js
 // @run-at       document-end
@@ -1272,51 +1275,32 @@
         );
     }
 
+    // The Oracle card changes its copy between "Pack", "Ready to fly",
+    // and "Trip kit packed". Find its smallest matching container.
     function findOracleAnchor() {
-        const candidates = Array.from(
-            document.querySelectorAll("div, section")
-        )
+        const candidates = Array.from(document.querySelectorAll("div, section"))
             .filter(el => {
-                if (el.id === ID || el.closest("#" + ID)) {
-                    return false;
-                }
-
-                const text =
-                    (el.textContent || "")
-                        .replace(/\\s+/g, " ")
-                        .trim();
-
-                return (
+                if (el.id === ID || el.closest("#" + ID)) return false;
+                const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+                return text.length < 900 &&
                     text.includes("Torn Oracle") &&
-                    text.includes("Ready to fly") &&
-                    text.includes("Trip kit packed")
-                );
+                    /Pack\b|Ready to fly|Trip kit packed|\bSkip\b/i.test(text);
             })
-            .sort(
-                (a, b) =>
-                    (a.textContent || "").length -
-                    (b.textContent || "").length
+            .sort((a, b) =>
+                (a.textContent || "").length - (b.textContent || "").length
             );
-
         return candidates[0] || null;
     }
 
+    // Never recursively call placePanel when Oracle is absent: it can
+    // load after us, or be disabled independently.
     function placePanel(el) {
-        const oracle =
-            findOracleAnchor();
-
-        if (
-            oracle &&
-            oracle.parentElement
-        ) {
-            oracle.parentElement.insertBefore(
-                el,
-                oracle
-            );
+        const oracle = findOracleAnchor();
+        if (oracle && oracle.parentElement && !el.contains(oracle)) {
+            oracle.parentElement.insertBefore(el, oracle);
             return true;
         }
-
-        placePanel(el);
+        host().prepend(el);
         return false;
     }
 
@@ -1463,7 +1447,7 @@
 </div>
         `;
 
-        host().prepend(el);
+        placePanel(el);
 
         document
             .getElementById("rtd05-settings-btn")
@@ -2285,7 +2269,7 @@
                     toastColor: "green",
                     toastDurationSeconds: 3,
                     urlCallback:
-                        "https://www.torn.com/page.php?sid=travel"
+                        "https://www.torn.com/travelagency.php"
                 }
             );
 
@@ -2369,7 +2353,7 @@
                 toastMessage: `Boarding reminder set for ${fmtTime(alarmAt)}`,
                 toastColor: "green",
                 toastDurationSeconds: 3,
-                urlCallback: "https://www.torn.com/page.php?sid=travel"
+                urlCallback: "https://www.torn.com/travelagency.php"
             }
         );
 
@@ -2514,12 +2498,14 @@
         }
     }
 
+    function isTravelPage() {
+        return location.pathname.endsWith("/travelagency.php") ||
+            (location.pathname.endsWith("/page.php") &&
+                new URLSearchParams(location.search).get("sid") === "travel");
+    }
+
     async function init() {
-        if (
-            !location.href.includes(
-                "sid=travel"
-            )
-        ) return;
+        if (!isTravelPage()) return;
 
         createPanel();
 
@@ -2547,7 +2533,7 @@
 
     const observer =
         new MutationObserver(() => {
-            if (!location.href.includes("sid=travel")) {
+            if (!isTravelPage()) {
                 return;
             }
 
