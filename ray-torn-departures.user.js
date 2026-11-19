@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ray's Torn Departures
 // @namespace    ray.torn.departures
-// @version      0.10.4
+// @version      0.11.0
 // @description  Mobile airport-style Oracle restock departure board for TornPDA
 // @match        https://www.torn.com/*
 // @match        https://torn.com/*
@@ -17,7 +17,7 @@
 
     const ORACLE_HOST = "https://torn-oracle.duckdns.org";
     const ORACLE_PREFIX = "/api/v1";
-    const ORACLE_VERSION = "2.6.4";
+    const ORACLE_VERSION = "2.6.10";
 
     const SETTINGS_KEY = "ray_departures_v05_settings";
     const SHOP_CACHE_KEY = "ray_departures_v05_shops";
@@ -1290,16 +1290,91 @@
         return candidates[0] || null;
     }
 
-    // Never recursively call placePanel when Oracle is absent: it can
-    // load after us, or be disabled independently.
+    // Torn can rebuild its own page containers. Keep the board in an
+    // independent body-level portal instead of a Torn/Oracle-owned subtree.
     function placePanel(el) {
-        const oracle = findOracleAnchor();
-        if (oracle && oracle.parentElement && !el.contains(oracle)) {
-            oracle.parentElement.insertBefore(el, oracle);
-            return true;
+        if (!document.body) return false;
+        document.body.appendChild(el);
+        return true;
+    }
+
+    // The always-visible launcher is also a diagnostic: if it is missing
+    // while on Travel Agency, TornPDA did not execute this userscript.
+    function ensureFloatingUI() {
+        if (!document.body) return;
+
+        if (!document.getElementById("rtd11-dock-style")) {
+            const style = document.createElement("style");
+            style.id = "rtd11-dock-style";
+            style.textContent = `
+#rtd11-launcher{
+    position:fixed!important;
+    right:12px!important;
+    bottom:90px!important;
+    z-index:2147483646!important;
+    display:flex!important;
+    align-items:center!important;
+    gap:7px!important;
+    padding:11px 14px!important;
+    border:1px solid #77c7a4!important;
+    border-radius:22px!important;
+    background:#153038!important;
+    color:#fff!important;
+    font:700 13px Arial,sans-serif!important;
+    box-shadow:0 3px 16px #0009!important;
+    cursor:pointer!important;
+    opacity:1!important;
+    visibility:visible!important;
+}
+#rtd11-launcher[hidden]{display:none!important}
+#${ID}{
+    position:fixed!important;
+    left:10px!important;
+    right:10px!important;
+    bottom:153px!important;
+    z-index:2147483645!important;
+    display:none!important;
+    width:auto!important;
+    max-width:680px!important;
+    max-height:calc(100vh - 200px)!important;
+    margin:0 auto!important;
+    overflow-y:auto!important;
+    box-shadow:0 6px 36px #000c!important;
+}
+#${ID}.rtd11-open{display:block!important}
+`;
+            document.head.appendChild(style);
         }
-        host().prepend(el);
-        return false;
+
+        let launcher = document.getElementById("rtd11-launcher");
+        if (!launcher) {
+            launcher = document.createElement("button");
+            launcher.type = "button";
+            launcher.id = "rtd11-launcher";
+            launcher.textContent = "✈ DEPARTURES · 0.11";
+            launcher.setAttribute("aria-label", "Ray's Torn Departures öffnen");
+            launcher.setAttribute("aria-expanded", "false");
+            launcher.onclick = () => {
+                const panel = document.getElementById(ID);
+                if (!panel) {
+                    alert("Ray's Departures wurde gestartet, aber das Board konnte nicht geladen werden. Version 0.11.0.");
+                    void init();
+                    return;
+                }
+                const open = !panel.classList.contains("rtd11-open");
+                panel.classList.toggle("rtd11-open", open);
+                launcher.setAttribute("aria-expanded", String(open));
+            };
+            document.body.appendChild(launcher);
+        }
+
+        const onTravel = isTravelPage();
+        launcher.hidden = !onTravel;
+        const panel = document.getElementById(ID);
+        if (!onTravel && panel) {
+            panel.classList.remove("rtd11-open");
+            launcher.setAttribute("aria-expanded", "false");
+        }
     }
 
     function createPanel() {
@@ -2523,7 +2598,9 @@
         initializing = true;
 
         try {
+            ensureFloatingUI();
             createPanel();
+            ensureFloatingUI();
 
             if (settings.token && settings.token.startsWith("orc_")) {
                 await refresh(false);
@@ -2552,12 +2629,19 @@
                     String(error?.message || error);
                 status.className = "rtd05-status bad";
             }
+            const launcher = document.getElementById("rtd11-launcher");
+            if (launcher) {
+                launcher.textContent = "✈ DEPARTURES: ERROR";
+                launcher.title = String(error?.message || error);
+            }
         } finally {
             initializing = false;
         }
     }
 
     function ensurePanel() {
+        if (!document.body) return;
+        ensureFloatingUI();
         if (!isTravelPage()) return;
 
         const panel = document.getElementById(ID);
@@ -2565,13 +2649,9 @@
             void init();
             return;
         }
-
-        // Reposition the board if the Torn/Oracle UI was rendered later.
-        const oracle = findOracleAnchor();
-        if (oracle && oracle.parentElement &&
-            !panel.contains(oracle) &&
-            panel.nextElementSibling !== oracle) {
-            oracle.parentElement.insertBefore(panel, oracle);
+        // Torn may rebuild its page roots while this body-level portal stays.
+        if (panel.parentElement !== document.body) {
+            document.body.appendChild(panel);
         }
     }
 
